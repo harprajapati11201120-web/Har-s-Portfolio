@@ -1,0 +1,24 @@
+{
+  "entities": {
+    "Project": {
+      "title": "Project",
+      "description": "A portfolio project which can be a video, website, or game.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Title of the project" },
+        "description": { "type": "string", "description": "Description of the project" },
+        "type": { "type": "string", "enum": ["video", "website", "game"], "description": "The category of the project" },
+        "url": { "type": "string", "description": "The destination URL (website/game) or video source" },
+        "posterUrl": { "type": "string", "description": "Poster image URL for the project" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Time of upload" }
+      },
+      "required": ["title", "type", "url", "posterUrl"]
+    }
+  },
+  "firestore": {
+    "projects": {
+      "schema": "Project",
+      "description": "Collection of portfolio projects"
+    }
+  }
+}

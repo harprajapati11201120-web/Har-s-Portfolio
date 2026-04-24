@@ -3,8 +3,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Trash2, LogOut, Upload, Link as LinkIcon, Video, Globe, Gamepad2, ShieldAlert, Lock, CheckCircle2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { initialProjects } from '../data/projects';
-import { db, handleFirestoreError } from '../lib/firebase';
-import { collection, addDoc, serverTimestamp, getDocs, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
 
 export default function AdminPanel() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -22,13 +20,23 @@ export default function AdminPanel() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [projects, setProjects] = useState<any[]>([]);
+  const [dbStatus, setDbStatus] = useState<{configured: boolean, healthy: boolean}>({configured: false, healthy: false});
 
-  // Local Session for static auth
+  // Check auth status from server on mount
   useEffect(() => {
-    const session = localStorage.getItem('har_admin_session');
-    if (session === 'true') {
-      setIsLoggedIn(true);
-    }
+    const checkAuth = async () => {
+      try {
+        const res = await fetch('/api/auth/status');
+        const data = await res.json();
+        setDbStatus({ configured: data.supabaseConfigured, healthy: data.databaseHealthy });
+        if (data.isAuthenticated) {
+          setIsLoggedIn(true);
+        }
+      } catch (err) {
+        console.error("Auth check failed", err);
+      }
+    };
+    checkAuth();
   }, []);
 
   useEffect(() => {
@@ -39,13 +47,13 @@ export default function AdminPanel() {
 
   const fetchProjects = async () => {
     try {
-      const q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
-      const snapshot = await getDocs(q);
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const res = await fetch('/api/projects');
+      if (!res.ok) throw new Error('Failed to fetch');
+      const data = await res.json();
       setProjects(data);
     } catch (err: any) {
-      console.error("Firebase fetch failed:", err);
-      setError("Failed to sync with database. Showing initial projects.");
+      console.error("Fetch projects failed:", err);
+      setError("Failed to sync projects with server.");
       setProjects(initialProjects);
     }
   };
@@ -53,63 +61,79 @@ export default function AdminPanel() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (username === 'har2011' && password === '20112011') {
-      setIsLoggedIn(true);
-      localStorage.setItem('har_admin_session', 'true');
-    } else {
-      setError('Invalid username or password');
+    
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      
+      if (res.ok) {
+        setIsLoggedIn(true);
+        setError('');
+        fetchProjects();
+      } else {
+        const data = await res.json();
+        setError(data.error || 'Invalid credentials');
+      }
+    } catch (err) {
+      setError('Connection to server failed.');
     }
   };
 
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    localStorage.removeItem('har_admin_session');
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/logout', { method: 'POST' });
+      setIsLoggedIn(false);
+    } catch (err) {}
   };
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    // Specific validation feedback
-    if (!title) {
-      setError('Please provide a title for the project.');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-    if (!posterFile) {
-      setError('A poster image is required for the preview card.');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-    if (type === 'video' && !contentFile) {
-      setError('Please upload a media file (Video, Audio, or Image) for this project.');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-    if (type !== 'video' && !url) {
-      setError(`Please enter a valid URL for the ${type}.`);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (!title || !description || !posterFile) {
+      setError('Please provide a title, description, and poster image.');
       return;
     }
 
     setIsUploading(true);
-    setUploadProgress(10);
+    setUploadProgress(0);
     
     try {
-      // For now, since we don't have Storage setup, we use placeholder URLs
-      // but keep the metadata in Firestore so it's global
-      const projectData = {
-        title,
-        description,
-        type,
-        url: type === 'video' ? 'https://www.w3schools.com/html/mov_bbb.mp4' : url,
-        posterUrl: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&q=80&w=800',
-        createdAt: serverTimestamp()
-      };
+      const formData = new FormData();
+      formData.append('title', title);
+      formData.append('description', description);
+      formData.append('type', type);
+      formData.append('url', url);
+      formData.append('poster', posterFile);
+      if (contentFile) {
+        formData.append('contentFile', contentFile);
+      }
 
-      await addDoc(collection(db, 'projects'), projectData);
+      const xhr = new XMLHttpRequest();
+      const promise = new Promise((resolve, reject) => {
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            setUploadProgress((e.loaded / e.total) * 100);
+          }
+        });
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(JSON.parse(xhr.responseText));
+          } else {
+            reject(new Error(JSON.parse(xhr.responseText).error || 'Upload failed'));
+          }
+        });
+        xhr.addEventListener('error', () => reject(new Error('Network error')));
+        xhr.open('POST', '/api/projects');
+        xhr.send(formData);
+      });
 
-      // Reset form on success
+      await promise;
+
+      // Reset form
       setTitle('');
       setDescription('');
       setUrl('');
@@ -117,10 +141,9 @@ export default function AdminPanel() {
       setContentFile(null);
       setUploadProgress(0);
       fetchProjects();
-      alert('Success! Your project is now globally live on Firebase.');
+      alert('Success! Project uploaded and synced globally.');
     } catch (err: any) {
-      console.error("Firebase upload failed:", err);
-      handleFirestoreError(err, 'create', 'projects');
+      setError(`Upload failed: ${err.message}`);
     } finally {
       setIsUploading(false);
     }
@@ -130,11 +153,15 @@ export default function AdminPanel() {
     if (!confirm('Are you sure you want to delete this project?')) return;
     
     try {
-      await deleteDoc(doc(db, 'projects', id));
-      fetchProjects();
+      const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchProjects();
+      } else {
+        const data = await res.json();
+        setError(data.error || 'Delete failed');
+      }
     } catch (err: any) {
-      console.error("Firebase delete failed:", err);
-      handleFirestoreError(err, 'delete', `projects/${id}`);
+      setError('Delete failed. Server unreachable.');
     }
   };
 
@@ -200,11 +227,17 @@ export default function AdminPanel() {
           <h1 className="text-4xl font-extrabold tracking-tight">Admin <span className="text-orange-500">Dashboard</span></h1>
           <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-green-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-green-500 ring-1 ring-green-500/20">
             <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
-            Connected to Firebase
+            {dbStatus.configured && dbStatus.healthy ? "Supabase Cloud Active" : "Local Database Mode"}
           </div>
           <p className="mt-2 flex items-center gap-2 text-sm text-neutral-400">
             <CheckCircle2 size={14} className="text-green-500" />
             Admin Account: {username}
+            <span className={cn(
+              "ml-4 flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
+              dbStatus.configured && dbStatus.healthy ? "bg-green-500/10 text-green-500" : "bg-orange-500/10 text-orange-500"
+            )}>
+              {dbStatus.configured && dbStatus.healthy ? "Cloud Sync Active" : "Local-Only Mode"}
+            </span>
           </p>
           {error && <p className="mt-2 text-sm font-bold text-red-500 bg-red-500/10 p-2 rounded-lg border border-red-500/20">{error}</p>}
         </div>

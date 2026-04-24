@@ -4,8 +4,6 @@ import { ExternalLink, Play, Gamepad2, Info, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import VideoPlayer from '../components/VideoPlayer';
 import { initialProjects } from '../data/projects';
-import { db } from '../lib/firebase';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 
 interface Project {
   id: string;
@@ -23,30 +21,29 @@ export default function Portfolio() {
   const [activeVideo, setActiveVideo] = useState<Project | null>(null);
 
   useEffect(() => {
-    // Phase 8: Secure List Queries - Synchronized globally
-    const q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
-    
-    // Use onSnapshot for real-time updates across multiple devices
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Project[];
-      
-      if (data.length > 0) {
-        setProjects(data);
-      } else {
-        // Fallback if DB is empty
+    async function fetchProjects() {
+      try {
+        const res = await fetch('/api/projects');
+        if (!res.ok) throw new Error('Fetch failed');
+        const data = await res.json();
+        
+        if (data && data.length > 0) {
+          setProjects(data);
+        } else {
+          setProjects(initialProjects as any);
+        }
+      } catch (error) {
+        console.error("Fetch projects failed:", error);
         setProjects(initialProjects as any);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
-    }, (error) => {
-      console.error("Firestore real-time sync failed:", error);
-      setProjects(initialProjects as any);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
+    }
+    fetchProjects();
+    
+    // Optional: Refresh every 30 seconds for global sync feel
+    const interval = setInterval(fetchProjects, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const filteredProjects = filter === 'all' 

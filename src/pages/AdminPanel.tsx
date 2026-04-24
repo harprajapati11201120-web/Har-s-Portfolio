@@ -50,19 +50,20 @@ export default function AdminPanel() {
   const fetchProjects = async () => {
     try {
       const res = await fetch('/api/projects');
-      if (!res.ok) throw new Error('Not available');
+      if (!res.ok) throw new Error('Backend failed');
       const data = await res.json();
       setProjects(data);
     } catch (err: any) {
-      // Load from local storage or default if backend fails (Netlify)
-      const localProjects = localStorage.getItem('projects');
-      if (localProjects) {
-        setProjects(JSON.parse(localProjects));
-      } else {
-        // Use simulation initial projects
+      // Netlify Fallback logic
+      let localProjects = localStorage.getItem('projects');
+      if (!localProjects) {
+        // Initialize localStorage with defaults if empty
+        localStorage.setItem('projects', JSON.stringify(initialProjects));
         setProjects(initialProjects);
+      } else {
+        setProjects(JSON.parse(localProjects));
       }
-      console.warn("Backend unavailable, loaded projects from local storage");
+      console.warn("Backend unavailable, using and persisting locally");
     }
   };
 
@@ -70,7 +71,14 @@ export default function AdminPanel() {
     e.preventDefault();
     setError('');
     
-    // 1. Try real backend first
+    // Static credentials for Netlify deployment
+    if (username === 'har2011' && password === '20112011') {
+      setIsLoggedIn(true);
+      localStorage.setItem('admin_session', 'authenticated');
+      setError('');
+      return;
+    }
+
     try {
       const res = await fetch('/api/login', {
         method: 'POST',
@@ -85,22 +93,9 @@ export default function AdminPanel() {
       }
       
       const data = await res.json();
-      if (data.error) {
-        setError(data.error);
-        return;
-      }
+      setError(data.error || 'Invalid credentials');
     } catch (err) {
-      // 2. Simulation fallback for Netlify
-      console.warn("Backend login failed, using simulation mode");
-    }
-
-    // Static credentials for Netlify deployment
-    if (username === 'har2011' && password === '20112011') {
-      setIsLoggedIn(true);
-      localStorage.setItem('admin_session', 'authenticated');
-      setError('');
-    } else {
-      setError('Invalid credentials');
+      setError('Connection refused. Is the server running?');
     }
   };
 
@@ -235,18 +230,26 @@ export default function AdminPanel() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this project?')) return;
-    try {
-      const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        fetchProjects();
-        return;
-      }
-    } catch (err: any) {
-      // Local fallback
+    
+    const performLocalDelete = () => {
       const existingProjects = JSON.parse(localStorage.getItem('projects') || '[]');
       const updatedProjects = existingProjects.filter((p: any) => p.id !== id);
       localStorage.setItem('projects', JSON.stringify(updatedProjects));
       setProjects(updatedProjects);
+      console.log("Locally deleted project:", id);
+    };
+
+    try {
+      const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchProjects();
+      } else {
+        // If API exists but returns error (e.g. 404), still try local fallback for simulation
+        performLocalDelete();
+      }
+    } catch (err: any) {
+      // Backend completely missing (Netlify)
+      performLocalDelete();
     }
   };
 
@@ -309,7 +312,13 @@ export default function AdminPanel() {
       <div className="mb-12 flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-extrabold tracking-tight">Admin <span className="text-orange-500">Dashboard</span></h1>
-          <p className="mt-1 flex items-center gap-2 text-sm text-neutral-400">
+          {(!window.location.port || window.location.hostname.includes('netlify.app')) && (
+            <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-orange-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-orange-500 ring-1 ring-orange-500/20">
+              <div className="h-1.5 w-1.5 rounded-full bg-orange-500 animate-pulse" />
+              Simulation Mode
+            </div>
+          )}
+          <p className="mt-2 flex items-center gap-2 text-sm text-neutral-400">
             <CheckCircle2 size={14} className="text-green-500" />
             Authenticated as Admin (har2011)
           </p>

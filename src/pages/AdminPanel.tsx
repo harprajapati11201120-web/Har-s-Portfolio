@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Trash2, LogOut, Upload, Link as LinkIcon, Video, Globe, Gamepad2, ShieldAlert, Lock, CheckCircle2 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { initialProjects } from '../data/projects';
 
 export default function AdminPanel() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -25,10 +26,16 @@ export default function AdminPanel() {
     const checkAuth = async () => {
       try {
         const res = await fetch('/api/auth/status');
+        if (!res.ok) throw new Error('Not available');
         const data = await res.json();
         if (data.isAuthenticated) setIsLoggedIn(true);
       } catch (err) {
-        console.error("Auth check failed:", err);
+        // Fallback for static hosting (Netlify)
+        const session = localStorage.getItem('admin_session');
+        if (session === 'authenticated') {
+          setIsLoggedIn(true);
+        }
+        console.warn("Backend auth unavailable, checked local session");
       }
     };
     checkAuth();
@@ -43,35 +50,65 @@ export default function AdminPanel() {
   const fetchProjects = async () => {
     try {
       const res = await fetch('/api/projects');
+      if (!res.ok) throw new Error('Not available');
       const data = await res.json();
       setProjects(data);
     } catch (err: any) {
-      console.error("Fetch projects failed:", err);
+      // Load from local storage or default if backend fails (Netlify)
+      const localProjects = localStorage.getItem('projects');
+      if (localProjects) {
+        setProjects(JSON.parse(localProjects));
+      } else {
+        // Use simulation initial projects
+        setProjects(initialProjects);
+      }
+      console.warn("Backend unavailable, loaded projects from local storage");
     }
   };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    
+    // 1. Try real backend first
     try {
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
+      
       if (res.ok) {
         setIsLoggedIn(true);
-      } else {
-        const data = await res.json();
-        setError(data.error || 'Login failed');
+        localStorage.setItem('admin_session', 'authenticated');
+        return;
+      }
+      
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+        return;
       }
     } catch (err) {
-      setError('Connection refused');
+      // 2. Simulation fallback for Netlify
+      console.warn("Backend login failed, using simulation mode");
+    }
+
+    // Static credentials for Netlify deployment
+    if (username === 'har2011' && password === '20112011') {
+      setIsLoggedIn(true);
+      localStorage.setItem('admin_session', 'authenticated');
+      setError('');
+    } else {
+      setError('Invalid credentials');
     }
   };
 
   const handleLogout = async () => {
-    await fetch('/api/logout', { method: 'POST' });
+    try {
+      await fetch('/api/logout', { method: 'POST' });
+    } catch (err) {}
+    localStorage.removeItem('admin_session');
     setIsLoggedIn(false);
   };
 
@@ -115,7 +152,43 @@ export default function AdminPanel() {
         formData.append('contentFile', contentFile);
       }
 
-      // Using XHR for progress tracking
+      // Simulation mode for Netlify (Local Storage only)
+      const isNetlify = window.location.hostname.includes('netlify.app') || !window.location.port;
+      
+      if (isNetlify) {
+        // Mock a real delay
+        for (let i = 0; i <= 100; i += 10) {
+          setUploadProgress(i);
+          await new Promise(r => setTimeout(r, 100));
+        }
+
+        const newProject = {
+          id: Math.random().toString(36).substr(2, 9),
+          title,
+          description,
+          type,
+          url: type === 'video' ? URL.createObjectURL(contentFile!) : url,
+          posterUrl: URL.createObjectURL(posterFile),
+          createdAt: new Date().toISOString()
+        };
+
+        const existingProjects = JSON.parse(localStorage.getItem('projects') || '[]');
+        const updatedProjects = [newProject, ...existingProjects];
+        localStorage.setItem('projects', JSON.stringify(updatedProjects));
+        
+        // Finalize
+        setTitle('');
+        setDescription('');
+        setUrl('');
+        setPosterFile(null);
+        setContentFile(null);
+        setUploadProgress(0);
+        setProjects(updatedProjects);
+        alert('Simulation Success! Since this is a static Netlify deployment, changes are stored in your browser session only. To make changes permanent for everyone, you must use a database like Firebase.');
+        return;
+      }
+
+      // Using XHR for progress tracking (Express backend)
       const xhr = new XMLHttpRequest();
       const promise = new Promise((resolve, reject) => {
         xhr.upload.addEventListener('progress', (event) => {
@@ -166,12 +239,14 @@ export default function AdminPanel() {
       const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
       if (res.ok) {
         fetchProjects();
-      } else {
-        const data = await res.json();
-        setError(data.error);
+        return;
       }
     } catch (err: any) {
-      setError(err.message);
+      // Local fallback
+      const existingProjects = JSON.parse(localStorage.getItem('projects') || '[]');
+      const updatedProjects = existingProjects.filter((p: any) => p.id !== id);
+      localStorage.setItem('projects', JSON.stringify(updatedProjects));
+      setProjects(updatedProjects);
     }
   };
 

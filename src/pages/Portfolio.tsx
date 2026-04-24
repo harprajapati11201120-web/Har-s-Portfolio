@@ -13,6 +13,8 @@ interface Project {
   posterUrl: string;
 }
 
+import { initialProjects } from '../data/projects';
+
 export default function Portfolio() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [filter, setFilter] = useState<'all' | 'video' | 'website' | 'game'>('all');
@@ -23,10 +25,17 @@ export default function Portfolio() {
     async function fetchProjects() {
       try {
         const res = await fetch('/api/projects');
+        if (!res.ok) throw new Error('Not available');
         const data = await res.json();
         setProjects(data);
       } catch (error) {
-        console.error("Error fetching projects:", error);
+        console.warn("Backend unavailable, loading from local storage/defaults");
+        const localData = localStorage.getItem('projects');
+        if (localData) {
+          setProjects(JSON.parse(localData));
+        } else {
+          setProjects(initialProjects as any);
+        }
       } finally {
         setLoading(false);
       }

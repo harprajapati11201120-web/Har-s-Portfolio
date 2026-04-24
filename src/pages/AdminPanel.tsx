@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Trash2, LogOut, Upload, Link as LinkIcon, Video, Globe, Gamepad2, ShieldAlert, Lock, CheckCircle2, RotateCcw } from 'lucide-react';
+import { Plus, Trash2, LogOut, Upload, Link as LinkIcon, Video, Globe, Gamepad2, ShieldAlert, Lock, CheckCircle2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function AdminPanel() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [captchaChallenge, setCaptchaChallenge] = useState('');
-  const [captchaAnswer, setCaptchaAnswer] = useState('');
   const [error, setError] = useState('');
 
   // Form State
@@ -36,22 +34,6 @@ export default function AdminPanel() {
     checkAuth();
   }, []);
 
-  const fetchCaptcha = async () => {
-    try {
-      const res = await fetch('/api/auth/captcha');
-      const data = await res.json();
-      setCaptchaChallenge(data.challenge);
-    } catch (err) {
-      console.error("Failed to fetch captcha:", err);
-    }
-  };
-
-  useEffect(() => {
-    if (!isLoggedIn) {
-      fetchCaptcha();
-    }
-  }, [isLoggedIn]);
-
   useEffect(() => {
     if (isLoggedIn) {
       fetchProjects();
@@ -75,16 +57,13 @@ export default function AdminPanel() {
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, captchaAnswer })
+        body: JSON.stringify({ username, password })
       });
       if (res.ok) {
         setIsLoggedIn(true);
       } else {
         const data = await res.json();
         setError(data.error || 'Login failed');
-        // Refresh captcha on failure
-        fetchCaptcha();
-        setCaptchaAnswer('');
       }
     } catch (err) {
       setError('Connection refused');
@@ -233,30 +212,6 @@ export default function AdminPanel() {
                   className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-white outline-none ring-orange-600 focus:ring-2"
                   placeholder="Enter password"
                   autoComplete="new-password"
-                />
-              </div>
-
-              <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-4">
-                <div className="mb-3 flex items-center justify-between text-xs font-bold text-neutral-500 uppercase tracking-widest">
-                  <span>Security Verification</span>
-                  <button 
-                    type="button" 
-                    onClick={fetchCaptcha}
-                    className="hover:text-orange-500 transition-colors"
-                  >
-                    <RotateCcw size={14} />
-                  </button>
-                </div>
-                <div className="mb-3 text-xl font-mono text-center select-none text-orange-500 bg-orange-500/5 py-3 rounded-lg border border-orange-500/10 tracking-widest italic">
-                  {captchaChallenge || "Loading..."}
-                </div>
-                <input 
-                  type="text" 
-                  value={captchaAnswer} 
-                  onChange={(e) => setCaptchaAnswer(e.target.value)}
-                  className="w-full text-center rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-2 text-white outline-none ring-orange-600 focus:ring-2"
-                  placeholder="Enter result..."
-                  required
                 />
               </div>
 

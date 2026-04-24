@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 import rateLimit from 'express-rate-limit';
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = 3000;
 const DATA_DIR = path.join(process.cwd(), 'data');
 const PROJECTS_FILE = path.join(DATA_DIR, 'projects.json');
@@ -55,34 +56,10 @@ const loginLimiter = rateLimit({
 
 // --- API ROUTES ---
 
-// Get CAPTCHA challenge
-app.get('/api/auth/captcha', (req, res) => {
-  const num1 = Math.floor(Math.random() * 10) + 1;
-  const num2 = Math.floor(Math.random() * 10) + 1;
-  const answer = (num1 + num2).toString();
-  
-  res.cookie('captcha_answer', answer, {
-    httpOnly: true,
-    signed: true,
-    maxAge: 1000 * 60 * 2 // 2 minutes to solve
-  });
-  
-  res.json({ challenge: `What is ${num1} + ${num2}?` });
-});
-
 // Login
 app.post('/api/login', loginLimiter, (req, res) => {
-  const { username, password, captchaAnswer } = req.body;
+  const { username, password } = req.body;
   
-  // Validate CAPTCHA
-  const expectedAnswer = req.signedCookies.captcha_answer;
-  if (!captchaAnswer || captchaAnswer !== expectedAnswer) {
-    return res.status(400).json({ error: 'CAPTCHA verification failed. Please try again.' });
-  }
-
-  // Clear captcha cookie after use
-  res.clearCookie('captcha_answer');
-
   if (username === 'har2011' && password === '20112011') {
     res.cookie('admin_token', 'har-authenticated', {
       httpOnly: true,

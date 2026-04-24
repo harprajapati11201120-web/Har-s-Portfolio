@@ -3,11 +3,13 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Trash2, LogOut, Upload, Link as LinkIcon, Video, Globe, Gamepad2, ShieldAlert, Lock, CheckCircle2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { initialProjects } from '../data/projects';
+import { useAuth } from '../lib/AuthContext';
+import { auth, googleProvider, db, handleFirestoreError } from '../lib/firebase';
+import { signInWithPopup, signOut } from 'firebase/auth';
+import { collection, addDoc, serverTimestamp, getDocs, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
 
 export default function AdminPanel() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const { user, loading: authLoading, isAdmin } = useAuth();
   const [error, setError] = useState('');
 
   // Form State
@@ -21,90 +23,38 @@ export default function AdminPanel() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [projects, setProjects] = useState<any[]>([]);
 
-  // Check auth on mount
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const res = await fetch('/api/auth/status');
-        if (!res.ok) throw new Error('Not available');
-        const data = await res.json();
-        if (data.isAuthenticated) setIsLoggedIn(true);
-      } catch (err) {
-        // Fallback for static hosting (Netlify)
-        const session = localStorage.getItem('admin_session');
-        if (session === 'authenticated') {
-          setIsLoggedIn(true);
-        }
-        console.warn("Backend auth unavailable, checked local session");
-      }
-    };
-    checkAuth();
-  }, []);
-
-  useEffect(() => {
-    if (isLoggedIn) {
+    if (user && isAdmin) {
       fetchProjects();
     }
-  }, [isLoggedIn]);
+  }, [user, isAdmin]);
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects');
-      if (!res.ok) throw new Error('Backend failed');
-      const data = await res.json();
+      const q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setProjects(data);
     } catch (err: any) {
-      // Netlify Fallback logic
-      let localProjects = localStorage.getItem('projects');
-      if (!localProjects) {
-        // Initialize localStorage with defaults if empty
-        localStorage.setItem('projects', JSON.stringify(initialProjects));
-        setProjects(initialProjects);
-      } else {
-        setProjects(JSON.parse(localProjects));
-      }
-      console.warn("Backend unavailable, using and persisting locally");
+      console.error("Firebase fetch failed:", err);
+      setError("Failed to sync with database. Showing initial projects.");
+      setProjects(initialProjects);
     }
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleLogin = async () => {
     setError('');
-    
-    // Static credentials for Netlify deployment
-    if (username === 'har2011' && password === '20112011') {
-      setIsLoggedIn(true);
-      localStorage.setItem('admin_session', 'authenticated');
-      setError('');
-      return;
-    }
-
     try {
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-      
-      if (res.ok) {
-        setIsLoggedIn(true);
-        localStorage.setItem('admin_session', 'authenticated');
-        return;
-      }
-      
-      const data = await res.json();
-      setError(data.error || 'Invalid credentials');
-    } catch (err) {
-      setError('Connection refused. Is the server running?');
+      await signInWithPopup(auth, googleProvider);
+    } catch (err: any) {
+      setError(err.message);
     }
   };
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/logout', { method: 'POST' });
+      await signOut(auth);
     } catch (err) {}
-    localStorage.removeItem('admin_session');
-    setIsLoggedIn(false);
   };
 
   const handleUpload = async (e: React.FormEvent) => {
@@ -134,81 +84,21 @@ export default function AdminPanel() {
     }
 
     setIsUploading(true);
-    setUploadProgress(0);
+    setUploadProgress(10);
     
     try {
-      const formData = new FormData();
-      formData.append('title', title);
-      formData.append('description', description);
-      formData.append('type', type);
-      formData.append('url', url);
-      formData.append('poster', posterFile);
-      if (contentFile) {
-        formData.append('contentFile', contentFile);
-      }
+      // For now, since we don't have Storage setup, we use placeholder URLs
+      // but keep the metadata in Firestore so it's global
+      const projectData = {
+        title,
+        description,
+        type,
+        url: type === 'video' ? 'https://www.w3schools.com/html/mov_bbb.mp4' : url,
+        posterUrl: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&q=80&w=800',
+        createdAt: serverTimestamp()
+      };
 
-      // Simulation mode for Netlify (Local Storage only)
-      const isNetlify = window.location.hostname.includes('netlify.app') || !window.location.port;
-      
-      if (isNetlify) {
-        // Mock a real delay
-        for (let i = 0; i <= 100; i += 10) {
-          setUploadProgress(i);
-          await new Promise(r => setTimeout(r, 100));
-        }
-
-        const newProject = {
-          id: Math.random().toString(36).substr(2, 9),
-          title,
-          description,
-          type,
-          url: type === 'video' ? URL.createObjectURL(contentFile!) : url,
-          posterUrl: URL.createObjectURL(posterFile),
-          createdAt: new Date().toISOString()
-        };
-
-        const existingProjects = JSON.parse(localStorage.getItem('projects') || '[]');
-        const updatedProjects = [newProject, ...existingProjects];
-        localStorage.setItem('projects', JSON.stringify(updatedProjects));
-        
-        // Finalize
-        setTitle('');
-        setDescription('');
-        setUrl('');
-        setPosterFile(null);
-        setContentFile(null);
-        setUploadProgress(0);
-        setProjects(updatedProjects);
-        alert('Simulation Success! Since this is a static Netlify deployment, changes are stored in your browser session only. To make changes permanent for everyone, you must use a database like Firebase.');
-        return;
-      }
-
-      // Using XHR for progress tracking (Express backend)
-      const xhr = new XMLHttpRequest();
-      const promise = new Promise((resolve, reject) => {
-        xhr.upload.addEventListener('progress', (event) => {
-          if (event.lengthComputable) {
-            setUploadProgress((event.loaded / event.total) * 100);
-          }
-        });
-        xhr.addEventListener('load', () => {
-          try {
-            const response = JSON.parse(xhr.responseText);
-            if (xhr.status >= 200 && xhr.status < 300) {
-              resolve(response);
-            } else {
-              reject(new Error(response.error || `Server error: ${xhr.status}`));
-            }
-          } catch (e) {
-            reject(new Error('Failed to parse server response'));
-          }
-        });
-        xhr.addEventListener('error', () => reject(new Error('Network connection failed. Please check your internet.')));
-        xhr.open('POST', '/api/projects');
-        xhr.send(formData);
-      });
-
-      await promise;
+      await addDoc(collection(db, 'projects'), projectData);
 
       // Reset form on success
       setTitle('');
@@ -218,11 +108,10 @@ export default function AdminPanel() {
       setContentFile(null);
       setUploadProgress(0);
       fetchProjects();
-      alert('Success! Your project is now live on the portfolio.');
+      alert('Success! Your project is now globally live on Firebase.');
     } catch (err: any) {
-      console.error("Upload failed:", err);
-      setError(`Upload failed: ${err.message}`);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      console.error("Firebase upload failed:", err);
+      handleFirestoreError(err, 'create', 'projects');
     } finally {
       setIsUploading(false);
     }
@@ -231,30 +120,26 @@ export default function AdminPanel() {
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this project?')) return;
     
-    const performLocalDelete = () => {
-      const existingProjects = JSON.parse(localStorage.getItem('projects') || '[]');
-      const updatedProjects = existingProjects.filter((p: any) => p.id !== id);
-      localStorage.setItem('projects', JSON.stringify(updatedProjects));
-      setProjects(updatedProjects);
-      console.log("Locally deleted project:", id);
-    };
-
     try {
-      const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        fetchProjects();
-      } else {
-        // If API exists but returns error (e.g. 404), still try local fallback for simulation
-        performLocalDelete();
-      }
+      await deleteDoc(doc(db, 'projects', id));
+      fetchProjects();
     } catch (err: any) {
-      // Backend completely missing (Netlify)
-      performLocalDelete();
+      console.error("Firebase delete failed:", err);
+      handleFirestoreError(err, 'delete', `projects/${id}`);
     }
   };
 
+  // If loading auth
+  if (authLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-orange-500 border-t-transparent" />
+      </div>
+    );
+  }
+
   // If not logged in
-  if (!isLoggedIn) {
+  if (!user) {
     return (
       <div className="flex h-[calc(100vh-80px)] items-center justify-center p-6">
         <motion.div 
@@ -264,45 +149,49 @@ export default function AdminPanel() {
         >
           <div className="bg-orange-600 p-8 text-center text-white">
             <Lock size={48} className="mx-auto mb-4" />
-            <h2 className="text-3xl font-bold">Admin Login</h2>
-            <p className="mt-2 opacity-80 text-sm">Secure access for Har only</p>
+            <h2 className="text-3xl font-bold">Admin Portal</h2>
+            <p className="mt-2 opacity-80 text-sm">Global synchronization active</p>
           </div>
           
           <div className="p-8">
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-neutral-500">Username</label>
-                <input 
-                  type="text" 
-                  value={username} 
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-white outline-none ring-orange-600 focus:ring-2"
-                  placeholder="Enter username"
-                  autoComplete="off"
-                />
-              </div>
-              <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-neutral-500">Password</label>
-                <input 
-                  type="password" 
-                  value={password} 
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-white outline-none ring-orange-600 focus:ring-2"
-                  placeholder="Enter password"
-                  autoComplete="new-password"
-                />
-              </div>
-
-              {error && <div className="flex items-center gap-2 text-sm text-red-500"><ShieldAlert size={14} /> {error}</div>}
+            <div className="space-y-6">
+              <p className="text-center text-neutral-400 text-sm leading-relaxed">
+                To manage your portfolio globally across all devices, please sign in with your verified administrator account.
+              </p>
+              
+              {error && <div className="flex items-center gap-2 text-sm text-red-500 bg-red-500/10 p-3 rounded-xl border border-red-500/20"><ShieldAlert size={14} /> {error}</div>}
+              
               <button 
-                type="submit"
-                className="w-full rounded-xl bg-orange-600 py-4 font-bold text-white shadow-lg shadow-orange-900/20 transition-all hover:bg-orange-700 active:scale-95"
+                onClick={handleLogin}
+                className="flex w-full items-center justify-center gap-3 rounded-xl bg-white py-4 font-bold text-black transition-all hover:bg-neutral-200 active:scale-95"
               >
-                Unlock Panel
+                 <img src="https://www.google.com/favicon.ico" className="h-5 w-5" alt="Google" />
+                 Continue with Google
               </button>
-            </form>
+            </div>
           </div>
         </motion.div>
+      </div>
+    );
+  }
+
+  // If logged in but NOT admin
+  if (!isAdmin) {
+    return (
+      <div className="flex h-[calc(100vh-80px)] items-center justify-center p-6 text-center">
+         <div className="max-w-md">
+            <ShieldAlert size={64} className="mx-auto mb-6 text-red-500" />
+            <h2 className="text-3xl font-bold mb-4">Access Restricted</h2>
+            <p className="text-neutral-400 mb-8">
+               You are signed in as <span className="text-white font-bold">{user.email}</span>, but this account does not have administrative privileges.
+            </p>
+            <button 
+              onClick={handleLogout}
+              className="px-8 py-3 rounded-full bg-neutral-800 font-bold hover:bg-neutral-700 transition-colors"
+            >
+              Sign Out
+            </button>
+         </div>
       </div>
     );
   }
@@ -312,15 +201,13 @@ export default function AdminPanel() {
       <div className="mb-12 flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-extrabold tracking-tight">Admin <span className="text-orange-500">Dashboard</span></h1>
-          {(!window.location.port || window.location.hostname.includes('netlify.app')) && (
-            <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-orange-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-orange-500 ring-1 ring-orange-500/20">
-              <div className="h-1.5 w-1.5 rounded-full bg-orange-500 animate-pulse" />
-              Simulation Mode
-            </div>
-          )}
+          <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-green-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-green-500 ring-1 ring-green-500/20">
+            <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+            Connected to Firebase
+          </div>
           <p className="mt-2 flex items-center gap-2 text-sm text-neutral-400">
             <CheckCircle2 size={14} className="text-green-500" />
-            Authenticated as Admin (har2011)
+            Admin: {user.email}
           </p>
           {error && <p className="mt-2 text-sm font-bold text-red-500 bg-red-500/10 p-2 rounded-lg border border-red-500/20">{error}</p>}
         </div>

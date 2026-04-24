@@ -3,6 +3,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ExternalLink, Play, Gamepad2, Info, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import VideoPlayer from '../components/VideoPlayer';
+import { initialProjects } from '../data/projects';
+import { db } from '../lib/firebase';
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 
 interface Project {
   id: string;
@@ -13,8 +16,6 @@ interface Project {
   posterUrl: string;
 }
 
-import { initialProjects } from '../data/projects';
-
 export default function Portfolio() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [filter, setFilter] = useState<'all' | 'video' | 'website' | 'game'>('all');
@@ -22,25 +23,30 @@ export default function Portfolio() {
   const [activeVideo, setActiveVideo] = useState<Project | null>(null);
 
   useEffect(() => {
-    async function fetchProjects() {
-      try {
-        const res = await fetch('/api/projects');
-        if (!res.ok) throw new Error('Not available');
-        const data = await res.json();
+    // Phase 8: Secure List Queries - Synchronized globally
+    const q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
+    
+    // Use onSnapshot for real-time updates across multiple devices
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Project[];
+      
+      if (data.length > 0) {
         setProjects(data);
-      } catch (error) {
-        console.warn("Backend unavailable, loading from local storage/defaults");
-        const localData = localStorage.getItem('projects');
-        if (localData) {
-          setProjects(JSON.parse(localData));
-        } else {
-          setProjects(initialProjects as any);
-        }
-      } finally {
-        setLoading(false);
+      } else {
+        // Fallback if DB is empty
+        setProjects(initialProjects as any);
       }
-    }
-    fetchProjects();
+      setLoading(false);
+    }, (error) => {
+      console.error("Firestore real-time sync failed:", error);
+      setProjects(initialProjects as any);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const filteredProjects = filter === 'all' 

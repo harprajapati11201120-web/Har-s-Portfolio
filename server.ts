@@ -9,7 +9,7 @@ import rateLimit from 'express-rate-limit';
 
 const app = express();
 app.set('trust proxy', 1);
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(process.cwd(), 'data');
 const PROJECTS_FILE = path.join(DATA_DIR, 'projects.json');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');

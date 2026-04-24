@@ -3,13 +3,13 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Trash2, LogOut, Upload, Link as LinkIcon, Video, Globe, Gamepad2, ShieldAlert, Lock, CheckCircle2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { initialProjects } from '../data/projects';
-import { useAuth } from '../lib/AuthContext';
-import { auth, googleProvider, db, handleFirestoreError } from '../lib/firebase';
-import { signInWithPopup, signOut } from 'firebase/auth';
+import { db, handleFirestoreError } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp, getDocs, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
 
 export default function AdminPanel() {
-  const { user, loading: authLoading, isAdmin } = useAuth();
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
   // Form State
@@ -23,11 +23,19 @@ export default function AdminPanel() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [projects, setProjects] = useState<any[]>([]);
 
+  // Local Session for static auth
   useEffect(() => {
-    if (user && isAdmin) {
+    const session = localStorage.getItem('har_admin_session');
+    if (session === 'true') {
+      setIsLoggedIn(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isLoggedIn) {
       fetchProjects();
     }
-  }, [user, isAdmin]);
+  }, [isLoggedIn]);
 
   const fetchProjects = async () => {
     try {
@@ -42,19 +50,20 @@ export default function AdminPanel() {
     }
   };
 
-  const handleLogin = async () => {
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
     setError('');
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (err: any) {
-      setError(err.message);
+    if (username === 'har2011' && password === '20112011') {
+      setIsLoggedIn(true);
+      localStorage.setItem('har_admin_session', 'true');
+    } else {
+      setError('Invalid username or password');
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-    } catch (err) {}
+  const handleLogout = () => {
+    setIsLoggedIn(false);
+    localStorage.removeItem('har_admin_session');
   };
 
   const handleUpload = async (e: React.FormEvent) => {
@@ -129,17 +138,8 @@ export default function AdminPanel() {
     }
   };
 
-  // If loading auth
-  if (authLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="h-12 w-12 animate-spin rounded-full border-4 border-orange-500 border-t-transparent" />
-      </div>
-    );
-  }
-
   // If not logged in
-  if (!user) {
+  if (!isLoggedIn) {
     return (
       <div className="flex h-[calc(100vh-80px)] items-center justify-center p-6">
         <motion.div 
@@ -149,49 +149,46 @@ export default function AdminPanel() {
         >
           <div className="bg-orange-600 p-8 text-center text-white">
             <Lock size={48} className="mx-auto mb-4" />
-            <h2 className="text-3xl font-bold">Admin Portal</h2>
+            <h2 className="text-3xl font-bold">Admin Login</h2>
             <p className="mt-2 opacity-80 text-sm">Global synchronization active</p>
           </div>
           
           <div className="p-8">
-            <div className="space-y-6">
-              <p className="text-center text-neutral-400 text-sm leading-relaxed">
-                To manage your portfolio globally across all devices, please sign in with your verified administrator account.
-              </p>
-              
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-neutral-500">Username</label>
+                <input 
+                  type="text" 
+                  value={username} 
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-white outline-none ring-orange-600 focus:ring-2"
+                  placeholder="Enter username"
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-neutral-500">Password</label>
+                <input 
+                  type="password" 
+                  value={password} 
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-white outline-none ring-orange-600 focus:ring-2"
+                  placeholder="Enter password"
+                  autoComplete="new-password"
+                />
+              </div>
+
               {error && <div className="flex items-center gap-2 text-sm text-red-500 bg-red-500/10 p-3 rounded-xl border border-red-500/20"><ShieldAlert size={14} /> {error}</div>}
               
               <button 
-                onClick={handleLogin}
-                className="flex w-full items-center justify-center gap-3 rounded-xl bg-white py-4 font-bold text-black transition-all hover:bg-neutral-200 active:scale-95"
+                type="submit"
+                className="w-full rounded-xl bg-orange-600 py-4 font-bold text-white shadow-lg shadow-orange-900/20 transition-all hover:bg-orange-700 active:scale-95"
               >
-                 <img src="https://www.google.com/favicon.ico" className="h-5 w-5" alt="Google" />
-                 Continue with Google
+                Unlock Dashboard
               </button>
-            </div>
+            </form>
           </div>
         </motion.div>
-      </div>
-    );
-  }
-
-  // If logged in but NOT admin
-  if (!isAdmin) {
-    return (
-      <div className="flex h-[calc(100vh-80px)] items-center justify-center p-6 text-center">
-         <div className="max-w-md">
-            <ShieldAlert size={64} className="mx-auto mb-6 text-red-500" />
-            <h2 className="text-3xl font-bold mb-4">Access Restricted</h2>
-            <p className="text-neutral-400 mb-8">
-               You are signed in as <span className="text-white font-bold">{user.email}</span>, but this account does not have administrative privileges.
-            </p>
-            <button 
-              onClick={handleLogout}
-              className="px-8 py-3 rounded-full bg-neutral-800 font-bold hover:bg-neutral-700 transition-colors"
-            >
-              Sign Out
-            </button>
-         </div>
       </div>
     );
   }
@@ -207,7 +204,7 @@ export default function AdminPanel() {
           </div>
           <p className="mt-2 flex items-center gap-2 text-sm text-neutral-400">
             <CheckCircle2 size={14} className="text-green-500" />
-            Admin: {user.email}
+            Admin Account: {username}
           </p>
           {error && <p className="mt-2 text-sm font-bold text-red-500 bg-red-500/10 p-2 rounded-lg border border-red-500/20">{error}</p>}
         </div>

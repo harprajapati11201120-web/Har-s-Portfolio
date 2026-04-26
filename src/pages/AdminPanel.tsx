@@ -77,11 +77,19 @@ export default function AdminPanel() {
         setError('');
         fetchProjects();
       } else {
-        const data = await res.json();
-        setError(data.error || 'Invalid credentials');
+        let errorMessage = 'Invalid credentials';
+        try {
+          const data = await res.json();
+          errorMessage = data.error || errorMessage;
+        } catch (e) {
+          const text = await res.text();
+          errorMessage = `Server Error (${res.status}): ${text.substring(0, 100)}`;
+        }
+        setError(errorMessage);
       }
-    } catch (err) {
-      setError('Connection to server failed.');
+    } catch (err: any) {
+      console.error("Login request failed:", err);
+      setError(`Connection to server failed: ${err.message || 'Unknown error'}`);
     }
   };
 

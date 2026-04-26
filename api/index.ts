@@ -1,6 +1,5 @@
 import express from 'express';
 import cors from 'cors';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
@@ -15,8 +14,8 @@ app.use(cors());
 const PORT = 3000;
 
 // Supabase Initialization
-let supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+let supabaseUrl = process.env.SUPABASE_URL || 'https://pxrisuslugsuzrljtzbi.supabase.co';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB4cmlzdXNsdWdzdXpybGp0emJpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzE4MjY1OSwiZXhwIjoyMDkyNzU4NjU5fQ.BZkUODEee-ok-_T6tpo9uJpBSEwMP-ilxUvWIiHaF68';
 
 // Normalize URL (strip /rest/v1 if present)
 if (supabaseUrl) {
@@ -110,23 +109,22 @@ const loginLimiter = rateLimit({
 });
 
 // --- API ROUTES ---
+const apiRouter = express.Router();
 
 // Health Check
-app.get('/api/health', (req, res) => {
+apiRouter.get('/health', (req, res) => {
   res.json({ status: 'ok', environment: process.env.NODE_ENV, vercel: !!process.env.VERCEL });
 });
 
 // Login
-app.post('/api/login', loginLimiter, (req, res) => {
+apiRouter.post('/login', loginLimiter, (req, res) => {
   const { username, password } = req.body;
-  // Use environment variables for safer credentials in production if needed, 
-  // but keeping user's hardcoded ones for continuity unless they ask to change.
   if (username === 'har2011' && password === '20112011') {
     res.cookie('admin_token', 'har-authenticated', {
       httpOnly: true,
       signed: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: true, // Always true for modern browsers/Vercel
+      sameSite: 'none', // Needed for cross-domain or iframe environments
       maxAge: 1000 * 60 * 60 * 24 * 7 // 1 week
     });
     res.json({ success: true });
@@ -136,33 +134,28 @@ app.post('/api/login', loginLimiter, (req, res) => {
 });
 
 // Logout
-app.post('/api/logout', (req, res) => {
+apiRouter.post('/logout', (req, res) => {
   res.clearCookie('admin_token');
   res.json({ success: true });
 });
 
-let supError = false;
-
 // Auth Status
-app.get('/api/auth/status', (req, res) => {
+apiRouter.get('/auth/status', (req, res) => {
   res.json({ 
     isAuthenticated: req.signedCookies.admin_token === 'har-authenticated',
     supabaseConfigured: !!supabase,
-    databaseHealthy: !!(supabase && !supError)
+    databaseHealthy: !!supabase
   });
 });
 
 // Helper to handle Supabase Storage
 async function uploadToSupabase(file: Express.Multer.File, bucket: string) {
   if (!supabase) return null;
-  
   const fileExt = path.extname(file.originalname);
   const fileName = `${Date.now()}-${uuidv4()}${fileExt}`;
-  const filePath = fileName;
-
   const { data, error } = await supabase.storage
     .from(bucket)
-    .upload(filePath, fs.readFileSync(file.path), {
+    .upload(fileName, fs.readFileSync(file.path), {
       contentType: file.mimetype,
       upsert: false
     });
@@ -174,13 +167,13 @@ async function uploadToSupabase(file: Express.Multer.File, bucket: string) {
 
   const { data: { publicUrl } } = supabase.storage
     .from(bucket)
-    .getPublicUrl(filePath);
+    .getPublicUrl(fileName);
 
   return publicUrl;
 }
 
 // Get Projects
-app.get('/api/projects', async (req, res) => {
+apiRouter.get('/projects', async (req, res) => {
   try {
     if (supabase) {
       const { data, error } = await supabase
@@ -189,7 +182,6 @@ app.get('/api/projects', async (req, res) => {
         .order('created_at', { ascending: false });
 
       if (!error && data) {
-        supError = false;
         return res.json(data.map((p: any) => ({
           id: p.id,
           title: p.title,
@@ -200,27 +192,16 @@ app.get('/api/projects', async (req, res) => {
           createdAt: p.created_at
         })));
       }
-      
-      if (error && (error.code === '42P01' || error.code === 'PGRST205')) {
-        console.warn(`Supabase Log: 'projects' table not found (Error ${error.code}).`);
-      }
-      supError = true;
     }
-  } catch (err) {
-    console.warn("Supabase connection issue.");
-    supError = true;
-  }
-  
-  // Return local projects if Supabase is unavailable (Note: this won't persist well on Vercel)
+  } catch (err) {}
   res.json(getLocalProjects());
 });
 
 // Upload Project
-app.post('/api/projects', isAdmin, upload.fields([{ name: 'poster', maxCount: 1 }, { name: 'contentFile', maxCount: 1 }]), async (req, res) => {
+apiRouter.post('/projects', isAdmin, upload.fields([{ name: 'poster', maxCount: 1 }, { name: 'contentFile', maxCount: 1 }]), async (req, res) => {
   try {
     const { title, description, type, url } = req.body;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-
     const posterFile = files?.['poster']?.[0];
     const contentFile = files?.['contentFile']?.[0];
 
@@ -229,11 +210,9 @@ app.post('/api/projects', isAdmin, upload.fields([{ name: 'poster', maxCount: 1 
     let finalPosterUrl = `/uploads/${posterFile.filename}`;
     let finalContentUrl = (type === 'video' && contentFile) ? `/uploads/${contentFile.filename}` : url;
 
-    // Try to upload to Supabase Storage if available
     if (supabase) {
       const supabasePoster = await uploadToSupabase(posterFile, 'projects');
       if (supabasePoster) finalPosterUrl = supabasePoster;
-
       if (type === 'video' && contentFile) {
         const supabaseContent = await uploadToSupabase(contentFile, 'projects');
         if (supabaseContent) finalContentUrl = supabaseContent;
@@ -250,74 +229,42 @@ app.post('/api/projects', isAdmin, upload.fields([{ name: 'poster', maxCount: 1 
       createdAt: new Date().toISOString()
     };
 
-    // Try to sync with Supabase DB
     if (supabase) {
-      try {
-        const { error } = await supabase.from('projects').insert([{
-          id: newProject.id,
-          title: newProject.title,
-          description: newProject.description,
-          type: newProject.type,
-          url: newProject.url,
-          poster_url: newProject.posterUrl,
-          created_at: newProject.createdAt
-        }]);
-        if (error) console.error("Supabase link error:", error);
-      } catch (e) {
-        console.error("Failed to sync project to Supabase");
-      }
+      await supabase.from('projects').insert([{
+        id: newProject.id,
+        title: newProject.title,
+        description: newProject.description,
+        type: newProject.type,
+        url: newProject.url,
+        poster_url: newProject.posterUrl,
+        created_at: newProject.createdAt
+      }]);
     }
 
-    // Still save local as fallback (though limited on Vercel)
     saveLocalProject(newProject);
-
     res.json(newProject);
   } catch (err: any) {
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-
 // Delete Project
-app.delete('/api/projects/:id', isAdmin, async (req, res) => {
+apiRouter.delete('/projects/:id', isAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    
-    // Try Supabase delete
     if (supabase) {
-      try {
-        await supabase.from('projects').delete().eq('id', id);
-      } catch (e) {
-        console.error("Failed to sync deletion to Supabase");
-      }
+      await supabase.from('projects').delete().eq('id', id);
     }
-
-    // Handle local file cleanup
-    const projects = getLocalProjects();
-    const project = projects.find((p: any) => p.id === id);
-
-    if (project) {
-      try {
-        const posterPath = path.join(UPLOADS_DIR, path.basename(project.posterUrl));
-        if (fs.existsSync(posterPath)) fs.unlinkSync(posterPath);
-        
-        if (project.url.startsWith('/uploads/')) {
-          const contentPath = path.join(UPLOADS_DIR, path.basename(project.url));
-          if (fs.existsSync(contentPath)) fs.unlinkSync(contentPath);
-        }
-      } catch (e) {
-        console.error("Error deleting local files:", e);
-      }
-    }
-
     deleteLocalProject(id);
     res.json({ success: true });
   } catch (err: any) {
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
+
+// Mount the router on both /api for local dev and / for Vercel
+app.use('/api', apiRouter);
+app.use('/', apiRouter);
 
 // Global error handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -342,6 +289,7 @@ if (isDev || !isVercel) {
     
     if (isDev) {
       console.log("Attaching Vite middleware...");
+      const { createServer: createViteServer } = await import('vite');
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: 'spa',
@@ -357,6 +305,7 @@ if (isDev || !isVercel) {
         });
       } else {
         console.warn("WARNING: Production mode requested but 'dist/' folder not found. Falling back to Vite middleware.");
+        const { createServer: createViteServer } = await import('vite');
         const vite = await createViteServer({
           server: { middlewareMode: true },
           appType: 'spa',

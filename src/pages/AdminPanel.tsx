@@ -48,12 +48,15 @@ export default function AdminPanel() {
   const fetchProjects = async () => {
     try {
       const res = await fetch('/api/projects');
-      if (!res.ok) throw new Error('Failed to fetch');
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Server responded with ${res.status}: ${text.substring(0, 50)}`);
+      }
       const data = await res.json();
       setProjects(data);
     } catch (err: any) {
       console.error("Fetch projects failed:", err);
-      setError("Failed to sync projects with server.");
+      setError(`Failed to sync projects: ${err.message}`);
       setProjects(initialProjects);
     }
   };

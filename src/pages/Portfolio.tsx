@@ -23,8 +23,12 @@ export default function Portfolio() {
   useEffect(() => {
     async function fetchProjects() {
       try {
+        console.log("Fetching from /api/projects...");
         const res = await fetch('/api/projects');
-        if (!res.ok) throw new Error('Fetch failed');
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`Server responded with ${res.status}: ${text.substring(0, 50)}`);
+        }
         const data = await res.json();
         
         if (data && data.length > 0) {

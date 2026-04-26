@@ -3,20 +3,15 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/server.ts"
+      "destination": "/api/index.ts"
     },
     {
       "source": "/uploads/(.*)",
-      "destination": "/server.ts"
+      "destination": "/api/index.ts"
     },
     {
       "source": "/(.*)",
       "destination": "/index.html"
     }
-  ],
-  "functions": {
-    "server.ts": {
-      "runtime": "vercel-node@latest"
-    }
-  }
+  ]
 }

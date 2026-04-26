@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
@@ -10,7 +11,8 @@ import { createClient } from '@supabase/supabase-js';
 
 const app = express();
 app.set('trust proxy', 1);
-const PORT = Number(process.env.PORT) || 3000;
+app.use(cors());
+const PORT = 3000;
 
 // Supabase Initialization
 let supabaseUrl = process.env.SUPABASE_URL || '';
@@ -108,6 +110,11 @@ const loginLimiter = rateLimit({
 });
 
 // --- API ROUTES ---
+
+// Health Check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', environment: process.env.NODE_ENV, vercel: !!process.env.VERCEL });
+});
 
 // Login
 app.post('/api/login', loginLimiter, (req, res) => {
@@ -312,11 +319,29 @@ app.delete('/api/projects/:id', isAdmin, async (req, res) => {
   }
 });
 
+// Global error handler
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error("EXPRESS ERROR:", err);
+  res.status(500).json({ error: 'Internal Server Error', details: err.message });
+});
+
+// Ensure /api routes that reach here (unmatched) return a 404 JSON instead of index.html
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'API route not found' });
+});
+
 export default app;
 
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+// AI Studio environment handling
+const isDev = process.env.NODE_ENV !== 'production';
+const isVercel = !!process.env.VERCEL;
+
+if (isDev || !isVercel) {
   async function startServer() {
-    if (process.env.NODE_ENV !== 'production') {
+    console.log(`Starting server in ${process.env.NODE_ENV || 'development'} mode...`);
+    
+    if (isDev) {
+      console.log("Attaching Vite middleware...");
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: 'spa',
@@ -324,17 +349,28 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
       app.use(vite.middlewares);
     } else {
       const distPath = path.join(process.cwd(), 'dist');
-      app.use(express.static(distPath));
-      app.get('*', (req, res) => {
-        res.sendFile(path.join(distPath, 'index.html'));
-      });
+      if (fs.existsSync(distPath)) {
+        console.log(`Serving static files from ${distPath}`);
+        app.use(express.static(distPath));
+        app.get('*', (req, res) => {
+          res.sendFile(path.join(distPath, 'index.html'));
+        });
+      } else {
+        console.warn("WARNING: Production mode requested but 'dist/' folder not found. Falling back to Vite middleware.");
+        const vite = await createViteServer({
+          server: { middlewareMode: true },
+          appType: 'spa',
+        });
+        app.use(vite.middlewares);
+      }
     }
 
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Server running at http://localhost:${PORT}`);
+      console.log(`Server running at http://0.0.0.0:${PORT}`);
     });
   }
 
-  startServer();
+  startServer().catch(err => {
+    console.error("Critical server startup error:", err);
+  });
 }
-

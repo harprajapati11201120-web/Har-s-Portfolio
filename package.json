@@ -8,6 +8,7 @@
     "start": "node api/index.ts",
     "build": "vite build",
     "preview": "vite preview",
+    "deploy:cloudflare": "npm run build && npx wrangler pages deploy dist",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
   },

@@ -193,11 +193,12 @@ app.use('/api', (req, res) => {
 
 export default app;
 
-// AI Studio environment handling
+// AI Studio / Vercel / Cloudflare environment handling
 const isDev = process.env.NODE_ENV !== 'production';
 const isVercel = !!process.env.VERCEL;
+const isCloudflare = !!process.env.CF_PAGES;
 
-if (isDev || !isVercel) {
+if (isDev || !isVercel || isCloudflare) {
   async function startServer() {
     console.log(`Starting server in ${process.env.NODE_ENV || 'development'} mode...`);
     

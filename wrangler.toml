@@ -1,10 +1,12 @@
 name = "har-portfolio"
 compatibility_date = "2024-04-01"
-pages_build_output_dir = "dist"
+
+[site]
+bucket = "./dist"
 
 [vars]
 NODE_VERSION = "20"
 
 [[kv_namespaces]]
 binding = "PORTFOLIO_DB"
-id = "YOUR_KV_NAMESPACE_ID" # You must create this in Cloudflare Dashboard -> Workers & Pages -> KV
+id = "YOUR_KV_NAMESPACE_ID"

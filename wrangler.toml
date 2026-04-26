@@ -1,14 +1,25 @@
 name = "har-portfolio"
+compatibility_date = "2024-04-01"
 pages_build_output_dir = "dist"
 
 [vars]
-# Add your environment variables here
 NODE_VERSION = "20"
 
 [[kv_namespaces]]
 binding = "PORTFOLIO_DB"
-# id = "your-kv-namespace-id" # You will get this from Cloudflare Dashboard
+id = "YOUR_KV_NAMESPACE_ID" # You must create this in Cloudflare Dashboard -> Workers & Pages -> KV
 
-[[r2_buckets]]
-binding = "PORTFOLIO_ASSETS"
-bucket_name = "portfolio-assets"
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = false
+persist = true
+head_sampling_rate = 1

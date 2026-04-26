@@ -1,18 +1,19 @@
-# Deployment Guidelines (Railway + Supabase)
+# Deployment Guidelines (Vercel + Supabase)
 
-## Railway Configuration
+## Vercel Configuration
 
-When deploying this app to Railway, ensure you set the following in **Settings > Variables**:
+This app is optimized for Vercel. When deploying:
 
-- `PORT`: 3000
-- `SUPABASE_URL`: Your Supabase Project URL (e.g., `https://xyz.supabase.co`).
-- `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase **Service Role** API Key. 
-  - **IMPORTANT**: This key starts with `eyJ...`. 
-  - **DO NOT** use keys starting with `sb_publishable_` (those are for Stripe).
+1. **Connect your GitHub Repository** to Vercel.
+2. In **Project Settings > Environment Variables**, add:
+   - `SUPABASE_URL`: Your Supabase Project URL.
+   - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase **Service Role** API Key (starts with `eyJ...`).
+   - `COOKIE_SECRET`: A random string for secure cookies (optional, defaults are set).
 
-## Supabase Setup
+## Supabase Setup (Mandatory)
 
-You must create a table named `projects` in your Supabase SQL Editor:
+### 1. Database Table
+Run this in your Supabase SQL Editor:
 
 ```sql
 create table projects (
@@ -24,14 +25,15 @@ create table projects (
   poster_url text,
   created_at timestamp with time zone default now()
 );
-
--- Enable Row Level Security (RLS) if you want, 
--- but for this demo using the Service Role key will bypass it.
--- alter table projects enable row level security;
 ```
 
-## Local Setup
+### 2. Storage Bucket
+1. Go to **Storage** in your Supabase Dashboard.
+2. Create a new bucket named **`projects`**.
+3. Set the bucket to **Public** (so the website can display images/videos).
 
-1. Copy `.env.example` to `.env`.
-2. Fill in your Supabase credentials.
-3. Run `npm run dev`.
+## Features
+
+- **Admin Panel**: Accessible at `/admin-panel`. 
+- **Persistence**: All uploads are stored in Supabase Storage, and project data is in Supabase DB. This prevents data loss during Vercel's serverless cold starts.
+- **WhatsApp Integration**: Floating button configured for client contact.

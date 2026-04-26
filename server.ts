@@ -27,8 +27,8 @@ if (supabaseUrl && supabaseKey) {
   supabase = createClient(supabaseUrl, supabaseKey);
 }
 
-const UPLOADS_DIR = path.join(process.cwd(), 'data/uploads');
-const PROJECTS_FILE = path.join(process.cwd(), 'data/projects.json');
+const UPLOADS_DIR = process.env.NODE_ENV === 'production' ? '/tmp' : path.join(process.cwd(), 'data/uploads');
+const PROJECTS_FILE = process.env.NODE_ENV === 'production' ? '/tmp/projects.json' : path.join(process.cwd(), 'data/projects.json');
 
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
@@ -47,7 +47,11 @@ const initialProjects = [
 
 function getLocalProjects() {
   if (!fs.existsSync(PROJECTS_FILE)) {
-    fs.writeFileSync(PROJECTS_FILE, JSON.stringify(initialProjects, null, 2));
+    try {
+      fs.writeFileSync(PROJECTS_FILE, JSON.stringify(initialProjects, null, 2));
+    } catch (e) {
+      return initialProjects;
+    }
     return initialProjects;
   }
   try {
@@ -69,7 +73,7 @@ function deleteLocalProject(id: string) {
 }
 
 app.use(express.json());
-app.use(cookieParser('har-secret-key'));
+app.use(cookieParser(process.env.COOKIE_SECRET || 'har-secret-key'));
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 // Storage configuration
@@ -108,10 +112,14 @@ const loginLimiter = rateLimit({
 // Login
 app.post('/api/login', loginLimiter, (req, res) => {
   const { username, password } = req.body;
+  // Use environment variables for safer credentials in production if needed, 
+  // but keeping user's hardcoded ones for continuity unless they ask to change.
   if (username === 'har2011' && password === '20112011') {
     res.cookie('admin_token', 'har-authenticated', {
       httpOnly: true,
       signed: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
       maxAge: 1000 * 60 * 60 * 24 * 7 // 1 week
     });
     res.json({ success: true });
@@ -137,6 +145,33 @@ app.get('/api/auth/status', (req, res) => {
   });
 });
 
+// Helper to handle Supabase Storage
+async function uploadToSupabase(file: Express.Multer.File, bucket: string) {
+  if (!supabase) return null;
+  
+  const fileExt = path.extname(file.originalname);
+  const fileName = `${Date.now()}-${uuidv4()}${fileExt}`;
+  const filePath = fileName;
+
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .upload(filePath, fs.readFileSync(file.path), {
+      contentType: file.mimetype,
+      upsert: false
+    });
+
+  if (error) {
+    console.error(`Supabase Storage Error (${bucket}):`, error);
+    return null;
+  }
+
+  const { data: { publicUrl } } = supabase.storage
+    .from(bucket)
+    .getPublicUrl(filePath);
+
+  return publicUrl;
+}
+
 // Get Projects
 app.get('/api/projects', async (req, res) => {
   try {
@@ -161,43 +196,6 @@ app.get('/api/projects', async (req, res) => {
       
       if (error && (error.code === '42P01' || error.code === 'PGRST205')) {
         console.warn(`Supabase Log: 'projects' table not found (Error ${error.code}).`);
-        
-        // Detailed cross-check
-        if (supabaseUrl && supabaseKey) {
-          try {
-            const urlMatch = supabaseUrl.match(/(?:https:\/\/)?([^.]+)\.supabase\.co/);
-            const keyPayload = JSON.parse(Buffer.from(supabaseKey.split('.')[1], 'base64').toString());
-            const urlId = urlMatch ? urlMatch[1] : 'unknown';
-            const keyId = keyPayload.ref || 'unknown';
-            
-            console.log(`- Project ID in URL: ${urlId}`);
-            console.log(`- Project ID in Key: ${keyId}`);
-            
-            if (urlId !== keyId) {
-              console.error("!!! CONFIG MISMATCH: Your SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY belong to DIFFERENT projects.");
-            }
-          } catch (e) {}
-        }
-        console.warn("Please ensure you ran the SQL in DEPLOYMENT.md and that RLS is configured.");
-      } else {
-        console.error("Supabase Error Logs:");
-        console.error("- Error Code:", error?.code);
-        console.error("- Message:", error?.message);
-        
-        const keyPrefix = supabaseKey ? supabaseKey.substring(0, 15) : 'MISSING';
-        console.error("- Current Key Prefix in Environment:", keyPrefix + "...");
-
-        if (supabaseKey && (supabaseKey.startsWith('sb_publishable_') || supabaseKey.startsWith('sb_secret_'))) {
-          console.error("!!! FATAL: The key in your Settings starts with 'sb_'. This is a STRIPE key, not a Supabase key.");
-          console.error("!!! ACTION REQUIRED: Go to Settings -> SUPABASE_SERVICE_ROLE_KEY and paste the eyJ... key you shared.");
-        } else if (supabaseKey && supabaseKey.startsWith('eyJ')) {
-          try {
-            const payload = JSON.parse(Buffer.from(supabaseKey.split('.')[1], 'base64').toString());
-            if (payload.role === 'anon') {
-              console.warn("!!! WARNING: You are using an 'anon' key. Some features might fail. Use 'service_role' for full access.");
-            }
-          } catch (e) {}
-        }
       }
       supError = true;
     }
@@ -206,7 +204,7 @@ app.get('/api/projects', async (req, res) => {
     supError = true;
   }
   
-  // Return local projects if Supabase is unavailable
+  // Return local projects if Supabase is unavailable (Note: this won't persist well on Vercel)
   res.json(getLocalProjects());
 });
 
@@ -221,20 +219,34 @@ app.post('/api/projects', isAdmin, upload.fields([{ name: 'poster', maxCount: 1 
 
     if (!posterFile) return res.status(400).json({ error: 'Poster image is required' });
 
+    let finalPosterUrl = `/uploads/${posterFile.filename}`;
+    let finalContentUrl = (type === 'video' && contentFile) ? `/uploads/${contentFile.filename}` : url;
+
+    // Try to upload to Supabase Storage if available
+    if (supabase) {
+      const supabasePoster = await uploadToSupabase(posterFile, 'projects');
+      if (supabasePoster) finalPosterUrl = supabasePoster;
+
+      if (type === 'video' && contentFile) {
+        const supabaseContent = await uploadToSupabase(contentFile, 'projects');
+        if (supabaseContent) finalContentUrl = supabaseContent;
+      }
+    }
+
     const newProject = {
       id: uuidv4(),
       title,
       description,
       type,
-      url: type === 'video' && contentFile ? `/uploads/${contentFile.filename}` : url,
-      posterUrl: `/uploads/${posterFile.filename}`,
+      url: finalContentUrl,
+      posterUrl: finalPosterUrl,
       createdAt: new Date().toISOString()
     };
 
-    // Try to sync with Supabase
+    // Try to sync with Supabase DB
     if (supabase) {
       try {
-        await supabase.from('projects').insert([{
+        const { error } = await supabase.from('projects').insert([{
           id: newProject.id,
           title: newProject.title,
           description: newProject.description,
@@ -243,12 +255,13 @@ app.post('/api/projects', isAdmin, upload.fields([{ name: 'poster', maxCount: 1 
           poster_url: newProject.posterUrl,
           created_at: newProject.createdAt
         }]);
+        if (error) console.error("Supabase link error:", error);
       } catch (e) {
         console.error("Failed to sync project to Supabase");
       }
     }
 
-    // Always save local for persistence in current container
+    // Still save local as fallback (though limited on Vercel)
     saveLocalProject(newProject);
 
     res.json(newProject);
@@ -257,6 +270,7 @@ app.post('/api/projects', isAdmin, upload.fields([{ name: 'poster', maxCount: 1 
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // Delete Project
 app.delete('/api/projects/:id', isAdmin, async (req, res) => {

@@ -14,21 +14,13 @@ const PORT = 3000;
 
 const UPLOADS_DIR = process.env.NODE_ENV === 'production' ? '/tmp' : path.join(process.cwd(), 'data/uploads');
 const PROJECTS_FILE = process.env.NODE_ENV === 'production' ? '/tmp/projects.json' : path.join(process.cwd(), 'data/projects.json');
+const DATA_DIR = path.dirname(PROJECTS_FILE);
 
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 // Local projects fallback logic
-const initialProjects = [
-  {
-    id: "1",
-    title: "AI Music Generator",
-    description: "A professional AI-powered music generation tool for businesses and content creators.",
-    type: "video",
-    url: "https://www.w3schools.com/html/mov_bbb.mp4",
-    posterUrl: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&q=80&w=800",
-    createdAt: new Date().toISOString()
-  }
-];
+const initialProjects: any[] = [];
 
 function getLocalProjects() {
   if (!fs.existsSync(PROJECTS_FILE)) {

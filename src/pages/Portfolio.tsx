@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ExternalLink, Play, Gamepad2, Info, X } from 'lucide-react';
+import { ExternalLink, Play, Gamepad2, Info, X, Layout } from 'lucide-react';
 import { cn } from '../lib/utils';
 import VideoPlayer from '../components/VideoPlayer';
 import { initialProjects } from '../data/projects';
@@ -147,8 +147,15 @@ export default function Portfolio() {
       <AnimatePresence mode="popLayout">
         {loading ? (
           <div key="loading" className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div key={i} className="h-80 animate-pulse rounded-3xl bg-neutral-900" />
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="group relative overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-900/50 p-1">
+                <div className="aspect-video animate-pulse rounded-2xl bg-neutral-800" />
+                <div className="space-y-3 p-6">
+                  <div className="h-6 w-2/3 animate-pulse rounded-lg bg-neutral-800" />
+                  <div className="h-4 w-full animate-pulse rounded-lg bg-neutral-800" />
+                  <div className="h-12 w-full animate-pulse rounded-xl bg-neutral-800" />
+                </div>
+              </div>
             ))}
           </div>
         ) : filteredProjects.length > 0 ? (
@@ -169,12 +176,30 @@ export default function Portfolio() {
         ) : (
           <motion.div 
             key="empty"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex flex-col items-center justify-center py-20 text-center text-neutral-500"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="flex flex-col items-center justify-center py-32 text-center"
           >
-            <Info size={48} className="mb-4 opacity-20" />
-            <p className="text-xl">No projects found in this category.</p>
+            <div className="relative mb-8">
+              <motion.div 
+                animate={{ scale: [1, 1.1, 1], opacity: [0.1, 0.2, 0.1] }}
+                transition={{ duration: 4, repeat: Infinity }}
+                className="absolute inset-0 -m-8 rounded-full bg-orange-600/20 blur-3xl"
+              />
+              <div className="relative flex h-24 w-24 items-center justify-center rounded-3xl bg-neutral-900 border border-neutral-800 text-orange-500 shadow-2xl">
+                <Layout size={40} className="opacity-50" />
+              </div>
+            </div>
+            <h2 className="mb-3 text-3xl font-black text-white tracking-tight">Showcase Incoming</h2>
+            <p className="mx-auto max-w-md text-lg text-neutral-400 leading-relaxed">
+              We're currently polishing our latest <span className="text-orange-500 font-bold">PH Technologies</span> innovations. Check back soon for groundbreaking AI and web solutions.
+            </p>
+            <button 
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              className="mt-10 px-8 py-3 rounded-full bg-white text-black font-bold hover:bg-orange-500 hover:text-white transition-all transform hover:scale-105 active:scale-95"
+            >
+              Back to Top
+            </button>
           </motion.div>
         )}
       </AnimatePresence>

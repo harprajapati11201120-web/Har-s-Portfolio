@@ -15,9 +15,19 @@ export default function Navbar() {
           >
             <Layout size={24} />
           </motion.div>
-          <span className="text-xl font-bold tracking-tight text-white sm:text-2xl">
-            Har's <span className="text-orange-500">Portfolio</span>
-          </span>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:gap-3">
+            <span className="text-xl font-bold tracking-tight text-white sm:text-2xl">
+              Har's <span className="text-orange-500">Portfolio</span>
+            </span>
+            <div className="hidden h-5 w-[1px] bg-neutral-800 sm:block" />
+            <motion.span 
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="text-xs font-medium tracking-widest text-neutral-500 uppercase sm:text-sm"
+            >
+              PH <span className="text-orange-500/80">Technologies</span>
+            </motion.span>
+          </div>
         </Link>
 
         <div className="flex items-center gap-4">

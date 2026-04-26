@@ -6,27 +6,11 @@ import multer from 'multer';
 import cookieParser from 'cookie-parser';
 import { v4 as uuidv4 } from 'uuid';
 import rateLimit from 'express-rate-limit';
-import { createClient } from '@supabase/supabase-js';
 
 const app = express();
 app.set('trust proxy', 1);
 app.use(cors());
 const PORT = 3000;
-
-// Supabase Initialization
-let supabaseUrl = process.env.SUPABASE_URL || 'https://pxrisuslugsuzrljtzbi.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB4cmlzdXNsdWdzdXpybGp0emJpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzE4MjY1OSwiZXhwIjoyMDkyNzU4NjU5fQ.BZkUODEee-ok-_T6tpo9uJpBSEwMP-ilxUvWIiHaF68';
-
-// Normalize URL (strip /rest/v1 if present)
-if (supabaseUrl) {
-  supabaseUrl = supabaseUrl.replace(/\/rest\/v1\/?$/, '');
-  if (supabaseUrl.endsWith('/')) supabaseUrl = supabaseUrl.slice(0, -1);
-}
-
-let supabase: any = null;
-if (supabaseUrl && supabaseKey) {
-  supabase = createClient(supabaseUrl, supabaseKey);
-}
 
 const UPLOADS_DIR = process.env.NODE_ENV === 'production' ? '/tmp' : path.join(process.cwd(), 'data/uploads');
 const PROJECTS_FILE = process.env.NODE_ENV === 'production' ? '/tmp/projects.json' : path.join(process.cwd(), 'data/projects.json');
@@ -142,58 +126,12 @@ apiRouter.post('/logout', (req, res) => {
 // Auth Status
 apiRouter.get('/auth/status', (req, res) => {
   res.json({ 
-    isAuthenticated: req.signedCookies.admin_token === 'har-authenticated',
-    supabaseConfigured: !!supabase,
-    databaseHealthy: !!supabase
+    isAuthenticated: req.signedCookies.admin_token === 'har-authenticated'
   });
 });
 
-// Helper to handle Supabase Storage
-async function uploadToSupabase(file: Express.Multer.File, bucket: string) {
-  if (!supabase) return null;
-  const fileExt = path.extname(file.originalname);
-  const fileName = `${Date.now()}-${uuidv4()}${fileExt}`;
-  const { data, error } = await supabase.storage
-    .from(bucket)
-    .upload(fileName, fs.readFileSync(file.path), {
-      contentType: file.mimetype,
-      upsert: false
-    });
-
-  if (error) {
-    console.error(`Supabase Storage Error (${bucket}):`, error);
-    return null;
-  }
-
-  const { data: { publicUrl } } = supabase.storage
-    .from(bucket)
-    .getPublicUrl(fileName);
-
-  return publicUrl;
-}
-
 // Get Projects
 apiRouter.get('/projects', async (req, res) => {
-  try {
-    if (supabase) {
-      const { data, error } = await supabase
-        .from('projects')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (!error && data) {
-        return res.json(data.map((p: any) => ({
-          id: p.id,
-          title: p.title,
-          description: p.description,
-          type: p.type,
-          url: p.url,
-          posterUrl: p.poster_url,
-          createdAt: p.created_at
-        })));
-      }
-    }
-  } catch (err) {}
   res.json(getLocalProjects());
 });
 
@@ -210,15 +148,6 @@ apiRouter.post('/projects', isAdmin, upload.fields([{ name: 'poster', maxCount: 
     let finalPosterUrl = `/uploads/${posterFile.filename}`;
     let finalContentUrl = (type === 'video' && contentFile) ? `/uploads/${contentFile.filename}` : url;
 
-    if (supabase) {
-      const supabasePoster = await uploadToSupabase(posterFile, 'projects');
-      if (supabasePoster) finalPosterUrl = supabasePoster;
-      if (type === 'video' && contentFile) {
-        const supabaseContent = await uploadToSupabase(contentFile, 'projects');
-        if (supabaseContent) finalContentUrl = supabaseContent;
-      }
-    }
-
     const newProject = {
       id: uuidv4(),
       title,
@@ -228,18 +157,6 @@ apiRouter.post('/projects', isAdmin, upload.fields([{ name: 'poster', maxCount: 
       posterUrl: finalPosterUrl,
       createdAt: new Date().toISOString()
     };
-
-    if (supabase) {
-      await supabase.from('projects').insert([{
-        id: newProject.id,
-        title: newProject.title,
-        description: newProject.description,
-        type: newProject.type,
-        url: newProject.url,
-        poster_url: newProject.posterUrl,
-        created_at: newProject.createdAt
-      }]);
-    }
 
     saveLocalProject(newProject);
     res.json(newProject);
@@ -252,9 +169,6 @@ apiRouter.post('/projects', isAdmin, upload.fields([{ name: 'poster', maxCount: 
 apiRouter.delete('/projects/:id', isAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    if (supabase) {
-      await supabase.from('projects').delete().eq('id', id);
-    }
     deleteLocalProject(id);
     res.json({ success: true });
   } catch (err: any) {

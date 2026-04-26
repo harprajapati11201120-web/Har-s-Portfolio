@@ -20,7 +20,6 @@ export default function AdminPanel() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [projects, setProjects] = useState<any[]>([]);
-  const [dbStatus, setDbStatus] = useState<{configured: boolean, healthy: boolean}>({configured: false, healthy: false});
 
   // Check auth status from server on mount
   useEffect(() => {
@@ -28,7 +27,7 @@ export default function AdminPanel() {
       try {
         const res = await fetch('/api/auth/status');
         const data = await res.json();
-        setDbStatus({ configured: data.supabaseConfigured, healthy: data.databaseHealthy });
+        // Since Supabase is removed, we just care about auth status
         if (data.isAuthenticated) {
           setIsLoggedIn(true);
         }
@@ -236,21 +235,17 @@ export default function AdminPanel() {
       <div className="mb-12 flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-extrabold tracking-tight">Admin <span className="text-orange-500">Dashboard</span></h1>
-          <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-green-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-green-500 ring-1 ring-green-500/20">
-            <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
-            {dbStatus.configured && dbStatus.healthy ? "Supabase Cloud Active" : "Local Database Mode"}
+          <div className="mt-4 flex items-center gap-4">
+            <div className="inline-flex items-center gap-2 rounded-full bg-green-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-green-500 ring-1 ring-green-500/20">
+              <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+              Local Storage Active
+            </div>
+            <p className="flex items-center gap-2 text-sm text-neutral-400">
+              <CheckCircle2 size={14} className="text-green-500" />
+              Admin: {username || 'Har'}
+            </p>
           </div>
-          <p className="mt-2 flex items-center gap-2 text-sm text-neutral-400">
-            <CheckCircle2 size={14} className="text-green-500" />
-            Admin Account: {username}
-            <span className={cn(
-              "ml-4 flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
-              dbStatus.configured && dbStatus.healthy ? "bg-green-500/10 text-green-500" : "bg-orange-500/10 text-orange-500"
-            )}>
-              {dbStatus.configured && dbStatus.healthy ? "Cloud Sync Active" : "Local-Only Mode"}
-            </span>
-          </p>
-          {error && <p className="mt-2 text-sm font-bold text-red-500 bg-red-500/10 p-2 rounded-lg border border-red-500/20">{error}</p>}
+          {error && <p className="mt-4 text-sm font-bold text-red-500 bg-red-500/10 p-2 rounded-lg border border-red-500/20">{error}</p>}
         </div>
         <button 
           onClick={handleLogout}

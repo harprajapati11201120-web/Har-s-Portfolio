@@ -4,6 +4,8 @@ import { ExternalLink, Play, Gamepad2, Info, X, Layout } from 'lucide-react';
 import { cn } from '../lib/utils';
 import VideoPlayer from '../components/VideoPlayer';
 import { initialProjects } from '../data/projects';
+import { db } from '../lib/firebase';
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 
 interface Project {
   id: string;
@@ -21,33 +23,29 @@ export default function Portfolio() {
   const [activeVideo, setActiveVideo] = useState<Project | null>(null);
 
   useEffect(() => {
-    async function fetchProjects() {
-      try {
-        console.log("Fetching from /api/projects...");
-        const res = await fetch('/api/projects');
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(`Server responded with ${res.status}: ${text.substring(0, 50)}`);
-        }
-        const data = await res.json();
-        
-        if (data && data.length > 0) {
-          setProjects(data);
-        } else {
-          setProjects(initialProjects as any);
-        }
-      } catch (error) {
-        console.error("Fetch projects failed:", error);
-        setProjects(initialProjects as any);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchProjects();
+    setLoading(true);
+    const q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
     
-    // Optional: Refresh every 30 seconds for global sync feel
-    const interval = setInterval(fetchProjects, 30000);
-    return () => clearInterval(interval);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const projectsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: (doc.data().createdAt as any)?.toDate?.()?.toISOString() || doc.data().createdAt
+      })) as unknown as Project[];
+      
+      if (projectsData.length > 0) {
+        setProjects(projectsData);
+      } else {
+        setProjects(initialProjects as any);
+      }
+      setLoading(false);
+    }, (error) => {
+      console.error("Firestore projects fetch failed:", error);
+      setProjects(initialProjects as any);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const filteredProjects = filter === 'all' 

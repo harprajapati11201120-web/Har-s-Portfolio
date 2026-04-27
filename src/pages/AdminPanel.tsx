@@ -3,108 +3,76 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Trash2, LogOut, Upload, Link as LinkIcon, Video, Globe, Gamepad2, ShieldAlert, Lock, CheckCircle2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { initialProjects } from '../data/projects';
+import { db } from '../lib/firebase';
+import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore';
 
 export default function AdminPanel() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [projects, setProjects] = useState<any[]>([]);
 
   // Form State
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [type, setType] = useState<'video' | 'website' | 'game'>('video');
+  const [type, setType] = useState<'video' | 'website' | 'game' | 'graphics'>('video');
   const [url, setUrl] = useState('');
   const [posterFile, setPosterFile] = useState<File | null>(null);
+  const [postUrlInput, setPosterUrlInput] = useState('');
   const [contentFile, setContentFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [projects, setProjects] = useState<any[]>([]);
 
-  // Check auth status from server on mount
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const res = await fetch('/api/auth/status');
-        const data = await res.json();
-        // Since Supabase is removed, we just care about auth status
-        if (data.isAuthenticated) {
-          setIsLoggedIn(true);
-        }
-      } catch (err) {
-        console.error("Auth check failed", err);
-      }
-    };
-    checkAuth();
+    // Check session storage for persistence within the session
+    const savedAuth = sessionStorage.getItem('admin_auth');
+    if (savedAuth === 'true') {
+      setIsLoggedIn(true);
+    }
   }, []);
 
   useEffect(() => {
     if (isLoggedIn) {
-      fetchProjects();
+      const q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const projectsData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          createdAt: (doc.data().createdAt as any)?.toDate?.()?.toISOString() || doc.data().createdAt
+        }));
+        setProjects(projectsData);
+      }, (err) => {
+        console.error("Firestore sync error:", err);
+        setError("Database sync error. Check your Firestore rules.");
+      });
+      return () => unsubscribe();
     }
   }, [isLoggedIn]);
 
-  const fetchProjects = async () => {
-    try {
-      const res = await fetch('/api/projects');
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Server responded with ${res.status}: ${text.substring(0, 50)}`);
-      }
-      const data = await res.json();
-      setProjects(data);
-    } catch (err: any) {
-      console.error("Fetch projects failed:", err);
-      setError(`Failed to sync projects: ${err.message}`);
-      setProjects(initialProjects);
-    }
-  };
-
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    
-    try {
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-      
-      if (res.ok) {
-        setIsLoggedIn(true);
-        setError('');
-        fetchProjects();
-      } else {
-        let errorMessage = 'Invalid credentials';
-        try {
-          const data = await res.json();
-          errorMessage = data.error || errorMessage;
-        } catch (e) {
-          const text = await res.text();
-          errorMessage = `Server Error (${res.status}): ${text.substring(0, 100)}`;
-        }
-        setError(errorMessage);
-      }
-    } catch (err: any) {
-      console.error("Login request failed:", err);
-      setError(`Connection to server failed: ${err.message || 'Unknown error'}`);
+    if (username === 'har2011' && password === '20112011') {
+      setIsLoggedIn(true);
+      sessionStorage.setItem('admin_auth', 'true');
+      setError('');
+    } else {
+      setError('Invalid username or password');
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await fetch('/api/logout', { method: 'POST' });
-      setIsLoggedIn(false);
-    } catch (err) {}
+  const handleLogout = () => {
+    setIsLoggedIn(false);
+    sessionStorage.removeItem('admin_auth');
   };
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isLoggedIn) return;
     setError('');
 
-    if (!title || !description || !posterFile) {
-      setError('Please provide a title, description, and poster image.');
+    if (!title || !description || (!posterFile && !postUrlInput)) {
+      setError('Please provide a title, description, and poster.');
       return;
     }
 
@@ -112,36 +80,16 @@ export default function AdminPanel() {
     setUploadProgress(0);
     
     try {
-      const formData = new FormData();
-      formData.append('title', title);
-      formData.append('description', description);
-      formData.append('type', type);
-      formData.append('url', url);
-      formData.append('poster', posterFile);
-      if (contentFile) {
-        formData.append('contentFile', contentFile);
-      }
+      const projectData = {
+        title,
+        description,
+        type,
+        url: url || (contentFile ? URL.createObjectURL(contentFile) : ''), 
+        posterUrl: postUrlInput || (posterFile ? URL.createObjectURL(posterFile) : ''),
+        createdAt: serverTimestamp()
+      };
 
-      const xhr = new XMLHttpRequest();
-      const promise = new Promise((resolve, reject) => {
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            setUploadProgress((e.loaded / e.total) * 100);
-          }
-        });
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(JSON.parse(xhr.responseText));
-          } else {
-            reject(new Error(JSON.parse(xhr.responseText).error || 'Upload failed'));
-          }
-        });
-        xhr.addEventListener('error', () => reject(new Error('Network error')));
-        xhr.open('POST', '/api/projects');
-        xhr.send(formData);
-      });
-
-      await promise;
+      await addDoc(collection(db, 'projects'), projectData);
 
       // Reset form
       setTitle('');
@@ -149,10 +97,11 @@ export default function AdminPanel() {
       setUrl('');
       setPosterFile(null);
       setContentFile(null);
+      setPosterUrlInput('');
       setUploadProgress(0);
-      fetchProjects();
-      alert('Success! Project uploaded and synced globally.');
+      alert('Success! Project added to Firestore.');
     } catch (err: any) {
+      console.error("Upload failed:", err);
       setError(`Upload failed: ${err.message}`);
     } finally {
       setIsUploading(false);
@@ -160,34 +109,28 @@ export default function AdminPanel() {
   };
 
   const handleDelete = async (id: string) => {
+    if (!isLoggedIn) return;
     if (!confirm('Are you sure you want to delete this project?')) return;
     
     try {
-      const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        fetchProjects();
-      } else {
-        const data = await res.json();
-        setError(data.error || 'Delete failed');
-      }
+      await deleteDoc(doc(db, 'projects', id));
     } catch (err: any) {
-      setError('Delete failed. Server unreachable.');
+      setError('Delete failed. Unauthorized or DB error.');
     }
   };
 
-  // If not logged in
   if (!isLoggedIn) {
     return (
       <div className="flex h-[calc(100vh-80px)] items-center justify-center p-6">
         <motion.div 
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-md overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-900 shadow-2xl"
+          className="w-full max-w-md overflow-hidden rounded-[2.5rem] bg-neutral-900 border border-neutral-800 shadow-2xl"
         >
           <div className="bg-orange-600 p-8 text-center text-white">
             <Lock size={48} className="mx-auto mb-4" />
             <h2 className="text-3xl font-bold">Admin Login</h2>
-            <p className="mt-2 opacity-80 text-sm">Global synchronization active</p>
+            <p className="mt-2 opacity-80 text-sm">Secure Global Administration</p>
           </div>
           
           <div className="p-8">
@@ -200,7 +143,6 @@ export default function AdminPanel() {
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-white outline-none ring-orange-600 focus:ring-2"
                   placeholder="Enter username"
-                  autoComplete="off"
                 />
               </div>
               <div>
@@ -211,7 +153,6 @@ export default function AdminPanel() {
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-white outline-none ring-orange-600 focus:ring-2"
                   placeholder="Enter password"
-                  autoComplete="new-password"
                 />
               </div>
 
@@ -221,9 +162,12 @@ export default function AdminPanel() {
                 type="submit"
                 className="w-full rounded-xl bg-orange-600 py-4 font-bold text-white shadow-lg shadow-orange-900/20 transition-all hover:bg-orange-700 active:scale-95"
               >
-                Unlock Dashboard
+                Login
               </button>
             </form>
+            <div className="mt-6 text-center">
+              <p className="text-[10px] text-neutral-600 uppercase tracking-widest">Powered by PH Technologies</p>
+            </div>
           </div>
         </motion.div>
       </div>
@@ -238,11 +182,11 @@ export default function AdminPanel() {
           <div className="mt-4 flex items-center gap-4">
             <div className="inline-flex items-center gap-2 rounded-full bg-green-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-green-500 ring-1 ring-green-500/20">
               <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
-              Local Storage Active
+              Firestore Sync Active
             </div>
             <p className="flex items-center gap-2 text-sm text-neutral-400">
               <CheckCircle2 size={14} className="text-green-500" />
-              Admin: {username || 'Har'}
+              Admin: {username}
             </p>
           </div>
           {error && <p className="mt-4 text-sm font-bold text-red-500 bg-red-500/10 p-2 rounded-lg border border-red-500/20">{error}</p>}
@@ -291,6 +235,7 @@ export default function AdminPanel() {
                     <option value="video">Media (Video/Audio/Image)</option>
                     <option value="website">Website</option>
                     <option value="game">Game</option>
+                    <option value="graphics">Graphic Design</option>
                   </select>
                 </div>
 
@@ -305,7 +250,7 @@ export default function AdminPanel() {
                           <Upload size={14} className="text-orange-500" />
                         </div>
                         <span className="text-sm text-neutral-500 truncate">
-                          {contentFile ? contentFile.name : 'Select or drag ANY media file (JPG, PNG, MP3, MP4, MPG...)'}
+                          {contentFile ? contentFile.name : 'Select media file...'}
                         </span>
                         <input 
                           type="file" 
@@ -314,45 +259,6 @@ export default function AdminPanel() {
                           className="hidden" 
                         />
                       </label>
-                      
-                      {contentFile && (
-                        <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black border border-neutral-800 mt-2 flex items-center justify-center">
-                           {contentFile.type.startsWith('video/') ? (
-                             <video 
-                                src={URL.createObjectURL(contentFile)} 
-                                className="h-full w-full object-contain" 
-                                controls
-                                muted
-                             />
-                           ) : contentFile.type.startsWith('image/') ? (
-                             <img 
-                                src={URL.createObjectURL(contentFile)} 
-                                className="h-full w-full object-contain" 
-                                alt="Preview"
-                             />
-                           ) : contentFile.type.startsWith('audio/') ? (
-                             <div className="flex flex-col items-center gap-4 text-neutral-500">
-                               <div className="rounded-full bg-neutral-900 p-6">
-                                 <Plus size={48} className="rotate-45" />
-                               </div>
-                               <audio 
-                                 src={URL.createObjectURL(contentFile)} 
-                                 controls 
-                                 className="w-64"
-                               />
-                             </div>
-                           ) : (
-                             <div className="text-neutral-500">Preview not available for this file type</div>
-                           )}
-                           <button 
-                             type="button"
-                             onClick={() => setContentFile(null)}
-                             className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white hover:bg-red-500 z-20"
-                           >
-                             <Trash2 size={16} />
-                           </button>
-                        </div>
-                      )}
                     </div>
                   ) : (
                     <div className="relative">
@@ -382,25 +288,39 @@ export default function AdminPanel() {
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-neutral-400">Poster Image</label>
-                <label className="flex h-40 w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-neutral-800 bg-neutral-950 transition-colors hover:border-orange-500/50 hover:bg-neutral-900/50">
-                  {posterFile ? (
-                    <div className="flex flex-col items-center p-4">
-                      <img src={URL.createObjectURL(posterFile)} className="mb-2 h-20 w-32 rounded-lg object-cover" />
-                      <span className="text-xs text-neutral-400">{posterFile.name} (Change)</span>
-                    </div>
-                  ) : (
-                    <>
-                      <Upload size={32} className="mb-2 opacity-20" />
-                      <p className="text-sm text-neutral-500 font-medium">Click or drag to upload poster</p>
-                    </>
-                  )}
+                <div className="space-y-3">
                   <input 
-                    type="file" 
-                    accept="image/*" 
-                    onChange={(e) => setPosterFile(e.target.files?.[0] || null)}
-                    className="hidden" 
+                    type="url" 
+                    value={postUrlInput}
+                    onChange={(e) => setPosterUrlInput(e.target.value)}
+                    className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm outline-none ring-orange-600 focus:ring-2"
+                    placeholder="Or paste poster URL directly..."
                   />
-                </label>
+                  <div className="flex items-center gap-4 text-neutral-600">
+                    <div className="h-[1px] flex-1 bg-neutral-800" />
+                    <span className="text-[10px] uppercase font-bold tracking-widest">OR</span>
+                    <div className="h-[1px] flex-1 bg-neutral-800" />
+                  </div>
+                  <label className="flex h-40 w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-neutral-800 bg-neutral-950 transition-colors hover:border-orange-500/50 hover:bg-neutral-900/50">
+                    {posterFile ? (
+                      <div className="flex flex-col items-center p-4">
+                        <img src={URL.createObjectURL(posterFile)} className="mb-2 h-20 w-32 rounded-lg object-cover" />
+                        <span className="text-xs text-neutral-400">{posterFile.name} (Change)</span>
+                      </div>
+                    ) : (
+                      <>
+                        <Upload size={32} className="mb-2 opacity-20" />
+                        <p className="text-sm text-neutral-500 font-medium">Click or drag to upload poster</p>
+                      </>
+                    )}
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      onChange={(e) => setPosterFile(e.target.files?.[0] || null)}
+                      className="hidden" 
+                    />
+                  </label>
+                </div>
               </div>
 
               <button 
@@ -408,17 +328,11 @@ export default function AdminPanel() {
                 disabled={isUploading}
                 className="relative flex w-full flex-col items-center justify-center gap-1 overflow-hidden rounded-2xl bg-orange-600 py-5 text-lg font-bold text-white shadow-xl shadow-orange-900/20 transition-all hover:bg-orange-700 active:scale-[0.98] disabled:opacity-80"
               >
-                {isUploading && (
-                  <div 
-                    className="absolute inset-y-0 left-0 bg-orange-500 transition-all duration-300 pointer-events-none" 
-                    style={{ width: `${uploadProgress}%` }}
-                  />
-                )}
                 <div className="relative z-10 flex items-center gap-2">
                   {isUploading ? (
                     <>
                       <div className="h-5 w-5 animate-spin rounded-full border-4 border-white border-t-transparent" />
-                      <span>Uploading... ({Math.round(uploadProgress)}%)</span>
+                      <span>Processing...</span>
                     </>
                   ) : (
                     <>
@@ -450,22 +364,7 @@ export default function AdminPanel() {
                   className="group flex items-center gap-4 rounded-2xl border border-neutral-800 bg-neutral-900/30 p-4 transition-all hover:border-neutral-700"
                 >
                   <div className="h-16 w-24 flex-shrink-0 overflow-hidden rounded-lg bg-black">
-                    {p.type === 'video' ? (
-                      <video 
-                        src={p.url} 
-                        className="h-full w-full object-cover" 
-                        muted 
-                        playsInline
-                        preload="metadata"
-                        onMouseOver={(e) => e.currentTarget.play()}
-                        onMouseOut={(e) => {
-                          e.currentTarget.pause();
-                          e.currentTarget.currentTime = 0;
-                        }}
-                      />
-                    ) : (
-                      <img src={p.posterUrl} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
-                    )}
+                    <img src={p.posterUrl} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
                   </div>
                   <div className="flex-1 overflow-hidden">
                     <h3 className="truncate font-bold">{p.title}</h3>
@@ -487,7 +386,7 @@ export default function AdminPanel() {
             </AnimatePresence>
             {projects.length === 0 && (
               <div className="flex h-40 flex-col items-center justify-center rounded-3xl border border-dashed border-neutral-800 text-neutral-500">
-                <p>No projects uploaded yet.</p>
+                <p>No projects synced with Firestore yet.</p>
               </div>
             )}
           </div>

@@ -1,0 +1,54 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Blueprints ---
+    function isValidProject(data) {
+      return data.keys().hasAll(['title', 'type', 'url', 'createdAt'])
+        && data.title is string && data.title.size() <= 200
+        && data.type is string && data.type in ['video', 'website', 'game', 'graphics']
+        && data.url is string && data.url.size() <= 2000
+        && (data.get('description', '') is string && data.get('description', '').size() <= 5000)
+        && (data.get('posterUrl', '') is string && data.get('posterUrl', '').size() <= 2000)
+        && data.createdAt == request.time;
+    }
+
+    // --- Collection Rules ---
+
+    // Projects: Publicly viewable and writable (Trade-off for moving away from Firebase Auth)
+    match /projects/{projectId} {
+      allow read: if true;
+      
+      allow create: if isValidId(projectId)
+        && isValidProject(incoming());
+        
+      allow update: if isValidId(projectId)
+        && isValidProject(incoming())
+        && incoming().createdAt == existing().createdAt;
+        
+      allow delete: if true; 
+    }
+
+    // Test connection doc
+    match /test/connection {
+      allow get: if true;
+    }
+  }
+}

@@ -10,7 +10,8 @@ import {
   Settings, 
   RotateCcw, 
   RotateCw,
-  SkipBack
+  SkipBack,
+  X
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -18,10 +19,11 @@ interface VideoPlayerProps {
   src: string;
   poster?: string;
   title?: string;
+  type?: 'video' | 'website' | 'game' | 'graphics';
   onClose?: () => void;
 }
 
-export default function VideoPlayer({ src, poster, title, onClose }: VideoPlayerProps) {
+export default function VideoPlayer({ src, poster, title, type, onClose }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -40,6 +42,11 @@ export default function VideoPlayer({ src, poster, title, onClose }: VideoPlayer
 
   // Detect media type
   const getMediaType = (url: string) => {
+    // Check for data URLs
+    if (url.startsWith('data:image/')) return 'image';
+    if (url.startsWith('data:video/')) return 'video';
+    if (url.startsWith('data:audio/')) return 'audio';
+
     // Strip query params and fragments to get the clean extension
     const cleanPath = url.split(/[?#]/)[0];
     const ext = cleanPath.split('.').pop()?.toLowerCase();
@@ -48,11 +55,15 @@ export default function VideoPlayer({ src, poster, title, onClose }: VideoPlayer
     if (['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'opus', 'wma'].includes(ext || '')) return 'audio';
     // Then images
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'tiff', 'ico'].includes(ext || '')) return 'image';
+    
+    // Check if it's a data URL or blob URL that we know is an image
+    if (type === 'graphics') return 'image';
+
     // Everything else is treated as video/general media
     return 'video';
   };
 
-  const mediaType = getMediaType(src);
+  const mediaType = type === 'graphics' ? 'image' : getMediaType(src);
 
   const handleMouseMove = () => {
     setShowControls(true);
@@ -165,9 +176,10 @@ export default function VideoPlayer({ src, poster, title, onClose }: VideoPlayer
       ref={containerRef}
       className={cn(
         "group/player relative flex items-center justify-center bg-black overflow-hidden select-none",
-        isFullscreen ? "w-screen h-screen" : "w-full h-full rounded-2xl"
+        isFullscreen ? "w-screen h-screen fixed inset-0 z-[100]" : "w-full h-full rounded-2xl"
       )}
       onMouseMove={handleMouseMove}
+      onTouchStart={handleMouseMove}
       onMouseLeave={() => isPlaying && mediaType !== 'image' && setShowControls(false)}
       onDoubleClick={mediaType !== 'image' ? toggleFullscreen : undefined}
     >
@@ -235,14 +247,14 @@ export default function VideoPlayer({ src, poster, title, onClose }: VideoPlayer
             exit={{ opacity: 0 }}
             className="absolute inset-0 z-10 flex flex-col justify-between bg-gradient-to-t from-black/80 via-transparent to-black/60"
           >
-            <div className="flex items-center justify-between p-6">
-              <h3 className="text-lg font-bold text-white drop-shadow-lg tracking-tight">{title}</h3>
+            <div className="flex items-center justify-between p-4 sm:p-6">
+              <h3 className="text-base sm:text-lg font-bold text-white drop-shadow-lg tracking-tight truncate max-w-[70%]">{title}</h3>
               {onClose && (
                 <button 
                   onClick={onClose}
-                  className="rounded-full bg-white/10 p-2.5 text-white backdrop-blur-xl transition-all hover:bg-orange-600 hover:scale-110 active:scale-95"
+                  className="rounded-full bg-white/10 p-2 sm:p-2.5 text-white backdrop-blur-xl transition-all hover:bg-orange-600 hover:scale-110 active:scale-95"
                 >
-                  <SkipBack size={20} className="rotate-180" />
+                  <X size={20} />
                 </button>
               )}
             </div>
@@ -259,9 +271,9 @@ export default function VideoPlayer({ src, poster, title, onClose }: VideoPlayer
               </div>
             )}
 
-            <div className="space-y-4 p-8 pointer-events-auto">
+            <div className="space-y-4 p-4 sm:p-8 pointer-events-auto">
               {mediaType !== 'image' && (
-                <div className="group/progress relative flex items-center h-2">
+                <div className="group/progress relative flex items-center h-4">
                   <input
                     type="range"
                     min="0"
@@ -269,7 +281,7 @@ export default function VideoPlayer({ src, poster, title, onClose }: VideoPlayer
                     step="0.1"
                     value={progress}
                     onChange={handleSeek}
-                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 transition-all hover:h-2 accent-orange-600 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-[0_0_10px_rgba(0,0,0,0.5)] [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-none"
+                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 transition-all hover:h-2 accent-orange-600 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-[0_0_10px_rgba(0,0,0,0.5)] [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-none"
                     style={{
                       background: `linear-gradient(to right, #ea580c ${progress}%, rgba(255, 255, 255, 0.2) ${progress}%)`
                     }}
@@ -278,17 +290,17 @@ export default function VideoPlayer({ src, poster, title, onClose }: VideoPlayer
               )}
 
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-8">
+                <div className="flex items-center gap-4 sm:gap-8">
                   {mediaType !== 'image' && (
                     <>
                       <button 
                         onClick={togglePlay}
                         className="text-white transition-transform hover:scale-125 active:scale-90"
                       >
-                        {isPlaying ? <Pause size={32} fill="currentColor" /> : <Play size={32} fill="currentColor" />}
+                        {isPlaying ? <Pause size={28} sm:size={32} fill="currentColor" /> : <Play size={28} sm:size={32} fill="currentColor" />}
                       </button>
 
-                      <div className="flex items-center gap-6">
+                      <div className="hidden sm:flex items-center gap-6">
                         <button onClick={() => skip(-10)} className="text-white/70 hover:text-white transition-colors">
                           <RotateCcw size={22} />
                         </button>
@@ -297,9 +309,9 @@ export default function VideoPlayer({ src, poster, title, onClose }: VideoPlayer
                         </button>
                       </div>
 
-                      <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-3 sm:gap-4">
                         <button onClick={toggleMute} className="text-white/70 hover:text-white transition-colors">
-                          {isMuted || volume === 0 ? <VolumeX size={26} /> : <Volume2 size={26} />}
+                          {isMuted || volume === 0 ? <VolumeX size={22} sm:size={26} /> : <Volume2 size={22} sm:size={26} />}
                         </button>
                         <input
                           type="range"
@@ -308,20 +320,20 @@ export default function VideoPlayer({ src, poster, title, onClose }: VideoPlayer
                           step="0.01"
                           value={isMuted ? 0 : volume}
                           onChange={handleVolumeChange}
-                          className="w-24 accent-orange-600 h-1 transition-all"
+                          className="hidden sm:block w-24 accent-orange-600 h-1 transition-all"
                         />
                       </div>
 
-                      <div className="text-sm font-mono font-medium text-white/80 tabular-nums">
-                        <span>{formatTime(currentTime)}</span>
-                        <span className="mx-2 text-white/30">/</span>
+                      <div className="text-xs sm:text-sm font-mono font-medium text-white/80 tabular-nums">
+                        <span className="hidden xs:inline">{formatTime(currentTime)}</span>
+                        <span className="mx-1 xs:mx-2 text-white/30 hidden xs:inline">/</span>
                         <span>{formatTime(duration)}</span>
                       </div>
                     </>
                   )}
                 </div>
 
-                <div className="flex items-center gap-8">
+                <div className="flex items-center gap-4 sm:gap-8">
                   {mediaType !== 'image' && (
                     <div className="relative">
                       <button 
@@ -331,7 +343,7 @@ export default function VideoPlayer({ src, poster, title, onClose }: VideoPlayer
                           isSettingsOpen && "text-orange-500 rotate-90"
                         )}
                       >
-                        <Settings size={22} />
+                        <Settings size={20} sm:size={22} />
                       </button>
 
                       <AnimatePresence>

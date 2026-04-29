@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Trash2, LogOut, Upload, Link as LinkIcon, Video, Globe, Gamepad2, ShieldAlert, Lock, CheckCircle2 } from 'lucide-react';
+import { Plus, Trash2, LogOut, Upload, Link as LinkIcon, Video, Globe, Gamepad2, ShieldAlert, Lock, CheckCircle2, Layout } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { initialProjects } from '../data/projects';
-import { db } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore';
 
 export default function AdminPanel() {
@@ -80,16 +80,67 @@ export default function AdminPanel() {
     setUploadProgress(0);
     
     try {
+      let finalUrl = url;
+      let finalPosterUrl = postUrlInput;
+
+      // Helper to convert file to base64
+      const toBase64 = (file: File): Promise<string> => 
+        new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(file);
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = error => reject(error);
+        });
+
+      if (contentFile && !url) {
+        // Warning: Large files (like 4K videos) might exceed Firestore document size limit (1MB)
+        if (contentFile.size > 800000) {
+          throw new Error("File too large. Please use a direct URL for videos or large images (limit 0.8MB).");
+        }
+        finalUrl = await toBase64(contentFile);
+        
+        // If it's an image and no poster is provided, use it as the poster too
+        if (contentFile.type.startsWith('image/') && !posterFile && !postUrlInput) {
+          finalPosterUrl = finalUrl;
+        }
+      }
+
+      if (posterFile && !postUrlInput) {
+        if (posterFile.size > 800000) {
+           throw new Error("Poster too large. Limit 0.8MB.");
+        }
+        finalPosterUrl = await toBase64(posterFile);
+      }
+
+      if (!finalPosterUrl) {
+        throw new Error("Please provide a poster image or upload an image file as content.");
+      }
+
       const projectData = {
         title,
         description,
         type,
-        url: url || (contentFile ? URL.createObjectURL(contentFile) : ''), 
-        posterUrl: postUrlInput || (posterFile ? URL.createObjectURL(posterFile) : ''),
+        url: finalUrl, 
+        posterUrl: finalPosterUrl,
         createdAt: serverTimestamp()
       };
 
-      await addDoc(collection(db, 'projects'), projectData);
+      try {
+        try {
+          await addDoc(collection(db, 'projects'), projectData);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.WRITE, 'projects');
+        }
+      } catch (err: any) {
+        console.error("Upload failed:", err);
+        try {
+          const errorDetails = JSON.parse(err.message);
+          setError(`Upload failed: ${errorDetails.error}`);
+        } catch {
+          setError(`Upload failed: ${err.message || String(err)}`);
+        }
+        return; // Stop further execution
+      }
 
       // Reset form
       setTitle('');
@@ -99,10 +150,10 @@ export default function AdminPanel() {
       setContentFile(null);
       setPosterUrlInput('');
       setUploadProgress(0);
-      alert('Success! Project added to Firestore.');
+      alert('Success! Project added to Portfolio.');
     } catch (err: any) {
-      console.error("Upload failed:", err);
-      setError(`Upload failed: ${err.message}`);
+      console.error("Critical Upload Error:", err);
+      setError(`Critical Error: ${err.message || String(err)}`);
     } finally {
       setIsUploading(false);
     }
@@ -110,12 +161,24 @@ export default function AdminPanel() {
 
   const handleDelete = async (id: string) => {
     if (!isLoggedIn) return;
-    if (!confirm('Are you sure you want to delete this project?')) return;
+    if (!confirm('Are you sure you want to delete this project permanently?')) return;
     
+    setError('');
     try {
-      await deleteDoc(doc(db, 'projects', id));
+      try {
+        await deleteDoc(doc(db, 'projects', id));
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.DELETE, `projects/${id}`);
+      }
     } catch (err: any) {
-      setError('Delete failed. Unauthorized or DB error.');
+      console.error("Delete failed:", err);
+      // Attempt to parse JSON error if possible
+      try {
+        const errorDetails = JSON.parse(err.message);
+        setError(`Delete failed: ${errorDetails.error}`);
+      } catch {
+        setError(`Delete failed: ${err.message || 'Unauthorized or DB error.'}`);
+      }
     }
   };
 
@@ -175,11 +238,11 @@ export default function AdminPanel() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl p-6 lg:p-12">
-      <div className="mb-12 flex items-center justify-between">
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-12">
+      <div className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-4xl font-extrabold tracking-tight">Admin <span className="text-orange-500">Dashboard</span></h1>
-          <div className="mt-4 flex items-center gap-4">
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Admin <span className="text-orange-500">Dashboard</span></h1>
+          <div className="mt-4 flex flex-wrap items-center gap-4">
             <div className="inline-flex items-center gap-2 rounded-full bg-green-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-green-500 ring-1 ring-green-500/20">
               <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
               Firestore Sync Active
@@ -193,19 +256,19 @@ export default function AdminPanel() {
         </div>
         <button 
           onClick={handleLogout}
-          className="flex items-center gap-2 rounded-full border border-neutral-800 px-6 py-2 text-sm font-bold text-neutral-400 hover:bg-red-500/10 hover:text-red-500"
+          className="flex items-center justify-center gap-2 rounded-full border border-neutral-800 bg-neutral-900/50 px-6 py-2.5 text-sm font-bold text-neutral-400 hover:bg-red-500/10 hover:text-red-500 transition-all active:scale-95"
         >
           <LogOut size={16} />
           Lock Dashboard
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-12 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-10 lg:grid-cols-2">
         {/* Upload Form */}
         <section>
-          <div className="rounded-3xl border border-neutral-800 bg-neutral-900/50 p-8 shadow-2xl">
-            <h2 className="mb-8 flex items-center gap-3 text-2xl font-bold">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-600">
+          <div className="rounded-[2rem] border border-neutral-800 bg-neutral-900/50 p-6 sm:p-8 shadow-2xl">
+            <h2 className="mb-8 flex items-center gap-3 text-xl sm:text-2xl font-bold">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-600">
                 <Plus size={24} />
               </div>
               Create New Project
@@ -239,23 +302,50 @@ export default function AdminPanel() {
                   </select>
                 </div>
 
-                <div className={cn(type === 'video' ? 'sm:col-span-2' : '')}>
+                <div className={cn((type === 'video' || type === 'graphics') ? 'sm:col-span-2' : '')}>
                   <label className="mb-2 block text-sm font-medium text-neutral-400">
-                    {type === 'video' ? 'Media File (Videos: MP4, MPG, MOV, AVI | Audio: MP3 | Image: JPG, PNG)' : 'Content URL'}
+                    {(type === 'video' || type === 'graphics') ? 'Content (URL or File)' : 'Content URL'}
                   </label>
-                  {type === 'video' ? (
+                  {(type === 'video' || type === 'graphics') ? (
                     <div className="space-y-4">
+                      <div className="relative">
+                        <input 
+                          type="url" 
+                          value={url}
+                          onChange={(e) => setUrl(e.target.value)}
+                          className="w-full rounded-xl border border-neutral-800 bg-neutral-950 pl-10 pr-4 py-3 outline-none ring-orange-600 focus:ring-2"
+                          placeholder="Paste direct URL (Storage link, etc.)"
+                        />
+                        <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 opacity-30" size={16} />
+                      </div>
+                      
+                      <div className="flex items-center gap-4 text-neutral-600">
+                        <div className="h-[1px] flex-1 bg-neutral-800" />
+                        <span className="text-[10px] uppercase font-bold tracking-widest">OR</span>
+                        <div className="h-[1px] flex-1 bg-neutral-800" />
+                      </div>
+
                       <label className="flex h-14 w-full cursor-pointer items-center gap-3 rounded-xl border border-dashed border-neutral-800 bg-neutral-950 px-4 transition-colors hover:border-orange-500/50 hover:bg-neutral-900/50">
                         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900">
                           <Upload size={14} className="text-orange-500" />
                         </div>
                         <span className="text-sm text-neutral-500 truncate">
-                          {contentFile ? contentFile.name : 'Select media file...'}
+                          {contentFile ? contentFile.name : `Select ${type === 'graphics' ? 'design' : 'media'} file...`}
                         </span>
                         <input 
                           type="file" 
-                          accept="video/*,audio/*,image/*" 
-                          onChange={(e) => setContentFile(e.target.files?.[0] || null)}
+                          accept={type === 'graphics' ? 'image/*' : 'video/*,audio/*,image/*'}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] || null;
+                            setContentFile(file);
+                            if (file) {
+                              if (file.type.startsWith('image/')) {
+                                setType('graphics');
+                              } else if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
+                                setType('video');
+                              }
+                            }
+                          }}
                           className="hidden" 
                         />
                       </label>
@@ -264,7 +354,7 @@ export default function AdminPanel() {
                     <div className="relative">
                       <input 
                         type="url" 
-                        required={type !== 'video'}
+                        required={type !== 'video' && type !== 'graphics'}
                         value={url}
                         onChange={(e) => setUrl(e.target.value)}
                         className="w-full rounded-xl border border-neutral-800 bg-neutral-950 pl-10 pr-4 py-3 outline-none ring-orange-600 focus:ring-2"
@@ -372,6 +462,7 @@ export default function AdminPanel() {
                       {p.type === 'video' && <Video size={10} />}
                       {p.type === 'website' && <Globe size={10} />}
                       {p.type === 'game' && <Gamepad2 size={10} />}
+                      {p.type === 'graphics' && <Layout size={10} />}
                       {p.type}
                     </div>
                   </div>

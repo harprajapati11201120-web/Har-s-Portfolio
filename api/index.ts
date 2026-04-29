@@ -202,6 +202,16 @@ if (isDev || !isVercel || isCloudflare) {
         appType: 'spa',
       });
       app.use(vite.middlewares);
+      
+      // Explicit SPA fallback for development mode
+      app.get('*', (req, res) => {
+        const indexHtml = path.join(process.cwd(), 'index.html');
+        if (fs.existsSync(indexHtml)) {
+           res.sendFile(indexHtml);
+        } else {
+           res.status(404).send('index.html not found');
+        }
+      });
     } else {
       const distPath = path.join(process.cwd(), 'dist');
       if (fs.existsSync(distPath)) {

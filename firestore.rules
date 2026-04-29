@@ -24,9 +24,9 @@ service cloud.firestore {
       return data.keys().hasAll(['title', 'type', 'url', 'createdAt'])
         && data.title is string && data.title.size() <= 200
         && data.type is string && data.type in ['video', 'website', 'game', 'graphics']
-        && data.url is string && data.url.size() <= 2000
-        && (data.get('description', '') is string && data.get('description', '').size() <= 5000)
-        && (data.get('posterUrl', '') is string && data.get('posterUrl', '').size() <= 2000)
+        && data.url is string && data.url.size() <= 1100000
+        && (data.get('description', '') is string && data.get('description', '').size() <= 10000)
+        && (data.get('posterUrl', '') is string && data.get('posterUrl', '').size() <= 1100000)
         && data.createdAt == request.time;
     }
 
@@ -43,7 +43,7 @@ service cloud.firestore {
         && isValidProject(incoming())
         && incoming().createdAt == existing().createdAt;
         
-      allow delete: if true; 
+      allow delete: if isValidId(projectId); 
     }
 
     // Test connection doc
